@@ -1,0 +1,38 @@
+:root {
+  --color-bg-base: #f5f7fa;
+  --color-bg-panel: #ffffff;
+  --color-border-subtle: #e4e7ed;
+  --color-text-dim: #909399;
+  --color-text-secondary: #606266;
+  --color-text-primary: #303133;
+  --color-accent: #409eff;
+  --color-success: #67c23a;
+  --color-warning: #e6a23c;
+  --color-danger: #f56c6c;
+  --font-stack: 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg-base);
+  font-family: var(--font-stack);
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+
+.page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.block {
+  margin-top: 16px;
+}
+
+.dim {
+  color: var(--color-text-dim);
+  font-size: 12px;
+}

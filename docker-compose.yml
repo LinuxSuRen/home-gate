@@ -1,0 +1,12 @@
+services:
+  home-gate:
+    # 本地构建：docker compose up -d --build
+    image: ghcr.io/linuxsuren/home-gate:latest
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    # 生产环境建议置于 HTTPS 反代之后并显式指定 issuer：
+    # command: ["-issuer", "https://gate.example.com"]
