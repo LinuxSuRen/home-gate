@@ -69,6 +69,19 @@ func issueInitialToken(t *testing.T, h http.Handler, hdr map[string]string) stri
 	return data["token"].(string)
 }
 
+// TestFeishuEnabledProbe 未配置飞书时探测接口应返回 enabled=false（登录页据此隐藏入口）。
+func TestFeishuEnabledProbe(t *testing.T) {
+	s := newTestServer(t)
+	w, out := doJSON(t, s.Handler(), "GET", "/api/auth/feishu/enabled", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("feishu enabled probe: %d %s", w.Code, w.Body.String())
+	}
+	data := out["data"].(map[string]any)
+	if data["enabled"] != false {
+		t.Fatalf("expected enabled=false when unconfigured, got %v", data["enabled"])
+	}
+}
+
 // TestFullFlow 覆盖：登录 → DCR 注册 → 授权（SSO 静默放行）→ 换 token → userinfo → 刷新。
 func TestFullFlow(t *testing.T) {
 	s := newTestServer(t)

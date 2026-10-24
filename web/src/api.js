@@ -56,6 +56,8 @@ export const changePassword = (oldPassword, newPassword) =>
   })
 export const feishuLoginURL = (next) =>
   `/api/auth/feishu/start${next ? `?next=${encodeURIComponent(next)}` : ''}`
+export const getFeishuEnabled = () =>
+  request('/api/auth/feishu/enabled').then((d) => !!d.enabled)
 
 // ---- 应用入口 ----
 export const getApps = () => request('/api/apps')

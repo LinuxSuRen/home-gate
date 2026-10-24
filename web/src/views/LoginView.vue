@@ -1,13 +1,22 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { login, feishuLoginURL } from '../api'
+import { login, feishuLoginURL, getFeishuEnabled } from '../api'
 
 const props = defineProps({ next: { type: String, default: '/' } })
 const emit = defineEmits(['success'])
 const username = ref('')
 const password = ref('')
 const submitting = ref(false)
+const feishuEnabled = ref(false)
+
+onMounted(async () => {
+  try {
+    feishuEnabled.value = await getFeishuEnabled()
+  } catch {
+    feishuEnabled.value = false
+  }
+})
 
 function goFeishu() {
   location.href = feishuLoginURL(props.next)
@@ -46,10 +55,12 @@ async function submit() {
           登录
         </el-button>
       </el-form>
-      <el-divider>或</el-divider>
-      <el-button size="large" style="width: 100%" @click="goFeishu">
-        使用飞书登录
-      </el-button>
+      <template v-if="feishuEnabled">
+        <el-divider>或</el-divider>
+        <el-button size="large" style="width: 100%" @click="goFeishu">
+          使用飞书登录
+        </el-button>
+      </template>
     </el-card>
   </div>
 </template>
