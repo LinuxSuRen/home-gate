@@ -100,6 +100,7 @@ async function handleChangePwd() {
     <el-container style="min-height: 100vh">
       <el-header class="app-header">
         <div class="app-header__brand">
+          <img class="app-header__logo" src="/logo.svg" alt="Home Gate logo" />
           <span class="app-header__title">Home Gate</span>
           <el-button
             v-if="isAdmin"
@@ -168,7 +169,11 @@ async function handleChangePwd() {
 .app-header__brand {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px;
+}
+.app-header__logo {
+  width: 24px;
+  height: 24px;
 }
 .app-header__title {
   font-size: 16px;
