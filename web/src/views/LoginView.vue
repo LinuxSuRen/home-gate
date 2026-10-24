@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { login, feishuLoginURL, getFeishuEnabled } from '../api'
 
 const props = defineProps({ next: { type: String, default: '/' } })
-const emit = defineEmits(['success'])
+const emit = defineEmits(['success', 'cancel'])
 const username = ref('')
 const password = ref('')
 const submitting = ref(false)
@@ -61,6 +61,9 @@ async function submit() {
           使用飞书登录
         </el-button>
       </template>
+      <div class="login-guest">
+        <el-button text @click="emit('cancel')">以游客身份浏览门户</el-button>
+      </div>
     </el-card>
   </div>
 </template>
@@ -78,5 +81,9 @@ async function submit() {
 }
 .login-title {
   text-align: center;
+}
+.login-guest {
+  text-align: center;
+  margin-top: 12px;
 }
 </style>

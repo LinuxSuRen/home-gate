@@ -13,6 +13,7 @@ const loading = ref(true)
 const me = ref(null)
 const adminTab = ref(false)
 const nextURL = ref('/')
+const showLogin = ref(false)
 const showChangePwd = ref(false)
 const pwdForm = ref({ old_password: '', new_password: '', confirm: '' })
 
@@ -21,6 +22,8 @@ const isAdmin = computed(() => !!(me.value && me.value.groups || []).includes('a
 onMounted(async () => {
   const params = new URLSearchParams(location.search)
   nextURL.value = params.get('next') || '/'
+  // 未登录时默认以游客身份浏览门户；显式访问 /login 或带回跳目标（如 OAuth 授权）时直接进登录页
+  showLogin.value = location.pathname === '/login' || nextURL.value !== '/'
   try {
     me.value = await getMe()
   } catch {
@@ -31,6 +34,17 @@ onMounted(async () => {
     showChangePwd.value = true
   }
 })
+
+function goLogin() {
+  showLogin.value = true
+  history.replaceState(null, '', '/login' + location.search)
+}
+
+function backToPortal() {
+  showLogin.value = false
+  nextURL.value = '/'
+  history.replaceState(null, '', '/')
+}
 
 async function handleLoginSuccess(user) {
   me.value = user
@@ -62,6 +76,7 @@ async function handleLogout() {
   }
   me.value = null
   adminTab.value = false
+  showLogin.value = false
 }
 
 async function handleChangePwd() {
@@ -91,10 +106,25 @@ async function handleChangePwd() {
   <div v-if="loading" class="page dim">正在加载…</div>
 
   <LoginView
-    v-else-if="!me"
+    v-else-if="!me && showLogin"
     :next="nextURL"
     @success="handleLoginSuccess"
+    @cancel="backToPortal"
   />
+
+  <el-container v-else-if="!me" style="min-height: 100vh">
+    <el-header class="app-header">
+      <div class="app-header__brand">
+        <span class="app-header__title">Home Gate</span>
+      </div>
+      <div class="app-header__user">
+        <el-button type="primary" @click="goLogin">登录</el-button>
+      </div>
+    </el-header>
+    <el-main>
+      <PortalView anonymous @login="goLogin" />
+    </el-main>
+  </el-container>
 
   <template v-else>
     <el-container style="min-height: 100vh">
