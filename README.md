@@ -13,6 +13,7 @@
 - **协议**：OAuth 2.0 授权码 + PKCE、refresh token（轮换）、OIDC 发现、JWKS（Ed25519）、RP-initiated logout、受保护 DCR
 - **身份源**：本地账号（初始 admin 兜底运维）+ 飞书上游联邦登录（可选）
 - **角色**：门户统一用户组（admin / operate / view 及自定义），经 `groups` 声明下发，各应用按映射换算本地角色
+- **门户浏览**：支持免登录以游客身份浏览公开链接；隐私链接、OAuth 应用入口与个人信息登录后可见
 
 ## 快速开始
 
