@@ -291,47 +291,58 @@ func (s *Server) feishuExchangeLogin(r *http.Request, appID, appSecret, code str
 }
 
 // handleApps 已接入系统入口卡片：OAuth 应用（DCR 注册的 portal_url）+ 纯链接入口。
-func (s *Server) handleApps(w http.ResponseWriter, r *http.Request, u *model.User) {
-	clients, err := s.db.ListClients()
-	if err != nil {
-		apiError(w, http.StatusInternalServerError, "server_error", "加载失败")
-		return
-	}
-	type app struct {
-		ClientID    string `json:"client_id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		LogoURL     string `json:"logo_url"`
-		PortalURL   string `json:"portal_url"` // 仅作跳转目标，不在卡片上展示
-	}
-	apps := []app{}
-	for _, c := range clients {
-		if c.Active && c.PortalURL != "" {
-			apps = append(apps, app{
-				ClientID: c.ClientID, Name: c.Name,
-				Description: c.Description, LogoURL: c.LogoURL,
-				PortalURL: c.PortalURL,
-			})
+// 免登录可访问：未登录仅返回公开链接；登录后返回全部入口（隐私链接 + OAuth 应用）。
+func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
+	u := s.currentUser(r)
+	apps := []portalApp{}
+	if u != nil {
+		clients, err := s.db.ListClients()
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, "server_error", "加载失败")
+			return
+		}
+		for _, c := range clients {
+			if c.Active && c.PortalURL != "" {
+				apps = append(apps, portalApp{
+					ClientID: c.ClientID, Name: c.Name,
+					Description: c.Description, LogoURL: c.LogoURL,
+					PortalURL: c.PortalURL, // 仅作跳转目标，不在卡片上展示
+				})
+			}
 		}
 	}
+
+	query := s.db.Where("active = ?", true)
+	if u == nil {
+		query = query.Where("public = ?", true)
+	}
 	var linkRows []model.AppLink
-	if err := s.db.Where("active = ?", true).Order("sort").Order("id").Find(&linkRows).Error; err != nil {
+	if err := query.Order("sort").Order("id").Find(&linkRows).Error; err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "加载失败")
 		return
 	}
-	type link struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		LogoURL     string `json:"logo_url"`
-		URL         string `json:"url"` // 跳转目标
-	}
-	links := []link{}
+	links := []portalLink{}
 	for _, l := range linkRows {
-		links = append(links, link{
+		links = append(links, portalLink{
 			Name: l.Name, Description: l.Description, LogoURL: l.LogoURL, URL: l.URL,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
 		"apps": apps, "links": links,
 	}})
+}
+
+type portalApp struct {
+	ClientID    string `json:"client_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	LogoURL     string `json:"logo_url"`
+	PortalURL   string `json:"portal_url"` // 仅作跳转目标，不在卡片上展示
+}
+
+type portalLink struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	LogoURL     string `json:"logo_url"`
+	URL         string `json:"url"` // 跳转目标
 }

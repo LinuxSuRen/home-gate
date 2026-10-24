@@ -23,6 +23,12 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+	// 测试结束关闭连接池，释放 SQLite 文件句柄（否则 Windows 上 t.TempDir 清理会失败）
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	tm, err := token.NewManager(db.DB)
 	if err != nil {
 		t.Fatalf("token manager: %v", err)
@@ -483,6 +489,86 @@ func TestLinkCRUD(t *testing.T) {
 	w, _ = doJSON(t, h, "DELETE", "/api/admin/links/"+lid, "", adminHdr)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("delete again should 404, got %d", w.Code)
+	}
+}
+
+// TestAppsVisibility 门户免登录浏览与链接可见性：
+// 匿名仅见公开链接（无 OAuth 应用入口）；登录后（含非管理员）可见隐私链接与全部入口。
+func TestAppsVisibility(t *testing.T) {
+	s := newTestServer(t)
+	h := s.Handler()
+	adminHdr := loginAdmin(t, h)
+
+	// OAuth 应用（带 portal_url，出现在门户卡片）
+	w, _ := doJSON(t, h, "POST", "/api/admin/clients",
+		`{"client_name":"media","redirect_uris":["https://media.test/cb"],"portal_url":"https://media.test"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create client: %d %s", w.Code, w.Body.String())
+	}
+
+	// 公开链接与隐私链接（缺省为隐私）各一
+	w, _ = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"公开看板","url":"https://pub.example.com","public":true}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create public link: %d %s", w.Code, w.Body.String())
+	}
+	w, out := doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"隐私后台","url":"https://priv.example.com"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create private link: %d %s", w.Code, w.Body.String())
+	}
+	privID := fmt.Sprintf("%v", out["data"].(map[string]any)["id"])
+
+	linkNames := func(m map[string]any) []string {
+		names := []string{}
+		for _, l := range m["links"].([]any) {
+			names = append(names, l.(map[string]any)["name"].(string))
+		}
+		return names
+	}
+
+	// 匿名：200，仅公开链接，无 apps
+	w, apps := doJSON(t, h, "GET", "/api/apps", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("anonymous apps should be 200, got %d %s", w.Code, w.Body.String())
+	}
+	anonData := apps["data"].(map[string]any)
+	if names := linkNames(anonData); len(names) != 1 || names[0] != "公开看板" {
+		t.Fatalf("anonymous should only see public links, got %v", names)
+	}
+	if n := len(anonData["apps"].([]any)); n != 0 {
+		t.Fatalf("anonymous should not see oauth apps, got %d", n)
+	}
+
+	// 非管理员登录用户：全部链接 + OAuth 应用
+	w, _ = doJSON(t, h, "POST", "/api/admin/users",
+		`{"username":"bob","password":"bob1234567","groups":["view"]}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create bob: %d %s", w.Code, w.Body.String())
+	}
+	w, _ = doJSON(t, h, "POST", "/api/auth/login", `{"username":"bob","password":"bob1234567"}`, nil)
+	bobHdr := map[string]string{"Cookie": strings.Split(w.Header().Get("Set-Cookie"), ";")[0]}
+	w, apps = doJSON(t, h, "GET", "/api/apps", "", bobHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("logged-in apps: %d %s", w.Code, w.Body.String())
+	}
+	bobData := apps["data"].(map[string]any)
+	if names := linkNames(bobData); len(names) != 2 {
+		t.Fatalf("logged-in user should see all links, got %v", names)
+	}
+	if n := len(bobData["apps"].([]any)); n != 1 {
+		t.Fatalf("logged-in user should see oauth apps, got %d", n)
+	}
+
+	// 隐私链接切换为公开 → 匿名可见
+	w, _ = doJSON(t, h, "PUT", "/api/admin/links/"+privID, `{"public":true}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update link public: %d %s", w.Code, w.Body.String())
+	}
+	w, apps = doJSON(t, h, "GET", "/api/apps", "", nil)
+	anonData = apps["data"].(map[string]any)
+	if names := linkNames(anonData); len(names) != 2 {
+		t.Fatalf("anonymous should see both public links now, got %v", names)
 	}
 }
 
