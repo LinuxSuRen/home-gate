@@ -54,6 +54,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleLogoutAPI)
 	s.mux.HandleFunc("GET /api/auth/me", s.handleMe)
 	s.mux.HandleFunc("POST /api/auth/change-password", s.handleChangePassword)
+	s.mux.HandleFunc("GET /api/auth/feishu/enabled", s.handleFeishuEnabled)
 	s.mux.HandleFunc("GET /api/auth/feishu/start", s.handleFeishuStart)
 	s.mux.HandleFunc("GET /api/auth/feishu/callback", s.handleFeishuCallback)
 	s.mux.HandleFunc("GET /api/apps", s.requireSession(s.handleApps))

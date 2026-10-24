@@ -152,6 +152,12 @@ func safeReturnTo(v string) string {
 	return v
 }
 
+// handleFeishuEnabled 公开探测飞书登录是否已配置（登录页据此决定是否展示入口）。
+func (s *Server) handleFeishuEnabled(w http.ResponseWriter, r *http.Request) {
+	_, _, enabled := s.feishuConfig()
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{"enabled": enabled}})
+}
+
 func (s *Server) handleFeishuStart(w http.ResponseWriter, r *http.Request) {
 	appID, _, enabled := s.feishuConfig()
 	if !enabled {
