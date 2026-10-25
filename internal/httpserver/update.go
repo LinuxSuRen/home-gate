@@ -217,8 +217,12 @@ func downloadAndSwap(url, exePath string) error {
 	old := exePath + ".old"
 	_ = os.Remove(old) // 清理历史备份
 	if err := os.Rename(exePath, old); err != nil {
-		os.Remove(newPath)
-		return fmt.Errorf("备份当前程序失败: %w", err)
+		// Windows 上若旧备份仍被进程占用（上次重启失败）则删除失败，改用带时间戳的备份名
+		old = fmt.Sprintf("%s.old-%d", exePath, time.Now().Unix())
+		if err := os.Rename(exePath, old); err != nil {
+			os.Remove(newPath)
+			return fmt.Errorf("备份当前程序失败: %w", err)
+		}
 	}
 	if err := os.Rename(newPath, exePath); err != nil {
 		_ = os.Rename(old, exePath) // 回滚

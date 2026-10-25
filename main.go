@@ -53,7 +53,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(*addr, srv.Handler()))
 }
 
-// waitForPortFree 轮询直至地址不可达（旧进程已退出），最多约 15 秒。
+// waitForPortFree 轮询直至地址不可达（旧进程已退出），每次约 0.6 秒，最多约 30 秒。
 func waitForPortFree(addr string) {
 	target := addr
 	if strings.HasPrefix(target, ":") {
