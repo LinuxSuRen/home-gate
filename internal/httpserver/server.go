@@ -17,14 +17,17 @@ import (
 const sessionCookie = "gate_session"
 
 type Server struct {
-	db     *store.DB
-	tm     *token.Manager
-	issuer string // 外部可达的基础地址，如 https://gate.example.com
-	mux    *http.ServeMux
+	db        *store.DB
+	tm        *token.Manager
+	issuer    string // 外部可达的基础地址，如 https://gate.example.com
+	version   string // 构建期注入的版本号
+	githubAPI string // GitHub API 基地址（自更新用，测试可替换）
+	mux       *http.ServeMux
 }
 
-func New(db *store.DB, tm *token.Manager, issuer string) *Server {
-	s := &Server{db: db, tm: tm, issuer: issuer, mux: http.NewServeMux()}
+func New(db *store.DB, tm *token.Manager, issuer, version string) *Server {
+	s := &Server{db: db, tm: tm, issuer: issuer, version: version,
+		githubAPI: defaultGithubAPI, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -32,6 +35,7 @@ func New(db *store.DB, tm *token.Manager, issuer string) *Server {
 func (s *Server) routes() {
 	// 公开端点
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("GET /api/version", s.handleVersion)
 	s.mux.HandleFunc("GET /.well-known/openid-configuration", s.handleDiscovery)
 	s.mux.HandleFunc("GET /.well-known/jwks.json", s.handleJWKS)
 
@@ -82,6 +86,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/admin/audit", s.requireAdmin(s.handleAdminAudit))
 	s.mux.HandleFunc("PUT /api/admin/settings", s.requireAdmin(s.handleAdminSettings))
 	s.mux.HandleFunc("GET /api/admin/settings", s.requireAdmin(s.handleAdminGetSettings))
+	s.mux.HandleFunc("GET /api/admin/update/check", s.requireAdmin(s.handleAdminUpdateCheck))
+	s.mux.HandleFunc("POST /api/admin/upgrade", s.requireAdmin(s.handleAdminUpgrade))
 
 	// 前端静态资源（/、/login 等均交给 SPA）
 	s.mux.HandleFunc("/", s.handleStatic)

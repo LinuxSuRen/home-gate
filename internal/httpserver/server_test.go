@@ -18,6 +18,7 @@ import (
 )
 
 const testIssuer = "https://gate.test"
+const testVersion = "v0.0.1-test"
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
@@ -35,7 +36,7 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("token manager: %v", err)
 	}
-	return New(db, tm, testIssuer)
+	return New(db, tm, testIssuer, testVersion)
 }
 
 // doJSON 执行 JSON 请求并返回响应与解析结果。
