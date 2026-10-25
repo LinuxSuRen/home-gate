@@ -509,13 +509,14 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request, adm
 			apiError(w, http.StatusInternalServerError, "server_error", "保存设置失败")
 			return
 		}
+		detail += "飞书上游配置 "
 	}
 	if req.FeishuAppSecret != "" {
 		if err := s.db.SetSetting("feishu_app_secret", req.FeishuAppSecret); err != nil {
 			apiError(w, http.StatusInternalServerError, "server_error", "保存设置失败")
 			return
 		}
-		detail += "飞书上游配置"
+		detail += "飞书上游配置 "
 	}
 	if detail == "" {
 		detail = "无变更"
