@@ -118,3 +118,8 @@ export const getAudit = (page, pageSize, action, actor) => {
 export const getSettings = () => request('/api/admin/settings')
 export const saveSettings = (settings) =>
   request('/api/admin/settings', { method: 'PUT', body: JSON.stringify(settings) })
+
+// ---- 版本与自更新 ----
+export const getVersion = () => request('/api/version')
+export const checkUpdate = () => request('/api/admin/update/check')
+export const upgrade = () => request('/api/admin/upgrade', { method: 'POST' })
