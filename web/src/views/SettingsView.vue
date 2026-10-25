@@ -8,12 +8,15 @@ const feishuAppSecret = ref('')
 const feishuCallback = ref('')
 const oidcEndpoints = ref({})
 const saving = ref(false)
+const sessionTTL = ref(24)
+const sessionSaving = ref(false)
 
 onMounted(async () => {
   try {
     const s = await getSettings()
     feishuAppID.value = s.feishu_app_id || ''
     feishuCallback.value = s.feishu_callback || ''
+    sessionTTL.value = s.session_ttl_hours || 24
     oidcEndpoints.value = { ...(s.oidc_endpoints || {}), scope: s.oidc_scope || 'openid profile email' }
   } catch (e) {
     ElMessage.error(e.message)
@@ -28,6 +31,22 @@ const endpointLabels = [
   ['discovery', 'OIDC 发现文档'],
   ['jwks', 'JWKS 公钥'],
 ]
+
+async function saveSession() {
+  if (!sessionTTL.value || sessionTTL.value < 1 || sessionTTL.value > 720) {
+    ElMessage.warning('会话时长需在 1～720 小时之间')
+    return
+  }
+  sessionSaving.value = true
+  try {
+    await saveSettings({ session_ttl_hours: sessionTTL.value })
+    ElMessage.success('已保存，新登录的会话将使用新的时长')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    sessionSaving.value = false
+  }
+}
 
 async function copyText(text) {
   try {
@@ -82,6 +101,18 @@ async function save() {
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+      </el-form-item>
+    </el-form>
+
+    <h3>会话设置</h3>
+    <p class="dim">登录会话的有效时长（小时），期间访问会自动续期；默认 24 小时（当天有效），对修改后新登录的会话生效。</p>
+    <el-form label-width="100px" style="max-width: 640px">
+      <el-form-item label="会话时长">
+        <el-input-number v-model="sessionTTL" :min="1" :max="720" />
+        <span class="dim" style="margin-left: 8px">小时（1～720）</span>
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" :loading="sessionSaving" @click="saveSession">保存</el-button>
       </el-form-item>
     </el-form>
 

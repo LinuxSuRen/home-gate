@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,6 +125,15 @@ func (d *DB) SetSetting(key, value string) error {
 		FirstOrCreate(&model.Setting{Key: key}).Error
 }
 
+// GetSettingInt 读取整型设置，缺失或非法时返回 def。
+func (d *DB) GetSettingInt(key string, def int) int {
+	v, err := strconv.Atoi(strings.TrimSpace(d.GetSetting(key)))
+	if err != nil || v <= 0 {
+		return def
+	}
+	return v
+}
+
 // ---- 用户 ----
 
 // FindUserByID 预加载用户组。
@@ -163,10 +173,11 @@ func (d *DB) SetUserGroups(u *model.User, names []string) error {
 
 // ---- 会话 ----
 
-func (d *DB) CreateSession(userID uint, ip string) (*model.Session, error) {
+// CreateSession 创建会话，有效期 ttl（由管理员设置，默认 24 小时）。
+func (d *DB) CreateSession(userID uint, ip string, ttl time.Duration) (*model.Session, error) {
 	s := &model.Session{
 		ID: RandomToken(32), UserID: userID,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: time.Now().Add(ttl),
 		CreatedAt: time.Now(), CreatedIP: ip,
 	}
 	return s, d.Create(s).Error
@@ -184,8 +195,8 @@ func (d *DB) GetSession(id string) (*model.Session, bool) {
 	return &s, true
 }
 
-func (d *DB) TouchSession(s *model.Session) {
-	s.ExpiresAt = time.Now().Add(24 * time.Hour)
+func (d *DB) TouchSession(s *model.Session, ttl time.Duration) {
+	s.ExpiresAt = time.Now().Add(ttl)
 	d.Save(s)
 }
 

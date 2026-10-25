@@ -10,7 +10,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/linuxsuren/home-gate/internal/model"
 	"github.com/linuxsuren/home-gate/internal/store"
 	"github.com/linuxsuren/home-gate/internal/token"
 )
@@ -23,6 +25,12 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+	// 测试结束关闭连接池，释放 SQLite 文件句柄（否则 Windows 上 t.TempDir 清理会失败）
+	t.Cleanup(func() {
+		if sqlDB, err := db.DB.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	})
 	tm, err := token.NewManager(db.DB)
 	if err != nil {
 		t.Fatalf("token manager: %v", err)
@@ -483,6 +491,64 @@ func TestLinkCRUD(t *testing.T) {
 	w, _ = doJSON(t, h, "DELETE", "/api/admin/links/"+lid, "", adminHdr)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("delete again should 404, got %d", w.Code)
+	}
+}
+
+// TestSessionTimeout 管理员可配置登录会话超时时长：默认 24 小时；调整后新会话与 cookie 同步生效。
+func TestSessionTimeout(t *testing.T) {
+	s := newTestServer(t)
+	h := s.Handler()
+	adminHdr := loginAdmin(t, h)
+
+	lastSession := func() *model.Session {
+		t.Helper()
+		var sess model.Session
+		if err := s.db.Order("created_at DESC").First(&sess).Error; err != nil {
+			t.Fatalf("load session: %v", err)
+		}
+		return &sess
+	}
+
+	// 默认 24h（当天有效）
+	sess := lastSession()
+	if d := time.Until(sess.ExpiresAt); d < 23*time.Hour || d > 24*time.Hour+time.Minute {
+		t.Fatalf("default session ttl should be ~24h, got %v", d)
+	}
+
+	// 调整为 2 小时
+	w, _ := doJSON(t, h, "PUT", "/api/admin/settings", `{"session_ttl_hours":2}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set ttl: %d %s", w.Code, w.Body.String())
+	}
+
+	// 新登录：会话 ~2h，cookie Max-Age=7200
+	w, _ = doJSON(t, h, "POST", "/api/auth/login", `{"username":"admin","password":"admin123"}`, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("re-login: %d %s", w.Code, w.Body.String())
+	}
+	if cookie := w.Header().Get("Set-Cookie"); !strings.Contains(cookie, "Max-Age=7200") {
+		t.Fatalf("cookie Max-Age should be 7200, got %s", cookie)
+	}
+	sess = lastSession()
+	if d := time.Until(sess.ExpiresAt); d < 1*time.Hour || d > 2*time.Hour+time.Minute {
+		t.Fatalf("configured session ttl should be ~2h, got %v", d)
+	}
+
+	// 设置查询返回当前值
+	w, out := doJSON(t, h, "GET", "/api/admin/settings", "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("get settings: %d %s", w.Code, w.Body.String())
+	}
+	if got := out["data"].(map[string]any)["session_ttl_hours"].(float64); got != 2 {
+		t.Fatalf("settings should return session_ttl_hours=2, got %v", got)
+	}
+
+	// 越界值拒绝
+	for _, bad := range []string{"0", "721", "-1"} {
+		w, _ = doJSON(t, h, "PUT", "/api/admin/settings", `{"session_ttl_hours":`+bad+`}`, adminHdr)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("session_ttl_hours=%s should be rejected, got %d", bad, w.Code)
+		}
 	}
 }
 

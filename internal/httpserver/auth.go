@@ -15,10 +15,22 @@ import (
 	"github.com/linuxsuren/home-gate/internal/store"
 )
 
-func (s *Server) setSessionCookie(w http.ResponseWriter, sid string) {
+// sessionTTL 登录会话有效时长（管理员可配，单位小时，默认 24 即当天有效）。
+func (s *Server) sessionTTL() time.Duration {
+	h := s.db.GetSettingInt("session_ttl_hours", 24)
+	if h < 1 {
+		h = 1
+	}
+	if h > 720 { // 上限 30 天，防误配为永不过期
+		h = 720
+	}
+	return time.Duration(h) * time.Hour
+}
+
+func (s *Server) setSessionCookie(w http.ResponseWriter, sid string, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Value: sid, Path: "/",
-		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 24 * 3600,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: int(ttl.Seconds()),
 	})
 }
 
@@ -55,13 +67,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusUnauthorized, "invalid_credentials", "用户名或密码错误")
 		return
 	}
-	sess, err := s.db.CreateSession(u.ID, clientIP(r))
+	ttl := s.sessionTTL()
+	sess, err := s.db.CreateSession(u.ID, clientIP(r), ttl)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "创建会话失败")
 		return
 	}
 	s.db.Audit(u.Username, "login", "本地账号登录", clientIP(r))
-	s.setSessionCookie(w, sess.ID)
+	s.setSessionCookie(w, sess.ID, ttl)
 	writeJSON(w, http.StatusOK, map[string]any{"data": userBrief(u)})
 }
 
@@ -198,13 +211,14 @@ func (s *Server) handleFeishuCallback(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusUnauthorized, "feishu_error", "飞书登录失败，请重试")
 		return
 	}
-	sess, err := s.db.CreateSession(u.ID, clientIP(r))
+	ttl := s.sessionTTL()
+	sess, err := s.db.CreateSession(u.ID, clientIP(r), ttl)
 	if err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "创建会话失败")
 		return
 	}
 	s.db.Audit(u.Username, "login", "飞书登录", clientIP(r))
-	s.setSessionCookie(w, sess.ID)
+	s.setSessionCookie(w, sess.ID, ttl)
 	http.Redirect(w, r, st.ReturnTo, http.StatusFound)
 }
 

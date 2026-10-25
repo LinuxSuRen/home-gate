@@ -113,7 +113,7 @@ func (s *Server) currentUser(r *http.Request) *model.User {
 	if err != nil || !u.Active {
 		return nil
 	}
-	s.db.TouchSession(sess)
+	s.db.TouchSession(sess, s.sessionTTL())
 	return u
 }
 

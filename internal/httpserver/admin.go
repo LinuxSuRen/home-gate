@@ -2,8 +2,10 @@ package httpserver
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/linuxsuren/home-gate/internal/model"
@@ -464,6 +466,8 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request, 
 	base := s.baseURL(r)
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
 		"feishu_app_id": appID, "feishu_enabled": appID != "",
+		// 登录会话有效时长（小时）：默认 24（当天有效），管理员可调
+		"session_ttl_hours": s.db.GetSettingInt("session_ttl_hours", 24),
 		// 飞书登录回调地址：需加入飞书开放平台应用的重定向 URL 白名单
 		"feishu_callback": base + "/api/auth/feishu/callback",
 		"oidc_endpoints": map[string]string{
@@ -480,12 +484,25 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request, 
 
 func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request, admin *model.User) {
 	var req struct {
-		FeishuAppID     string `json:"feishu_app_id"`
-		FeishuAppSecret string `json:"feishu_app_secret"`
+		FeishuAppID      string `json:"feishu_app_id"`
+		FeishuAppSecret  string `json:"feishu_app_secret"`
+		SessionTTLHours  *int   `json:"session_ttl_hours"`
 	}
 	if err := readJSONBody(r, &req); err != nil {
 		apiError(w, http.StatusBadRequest, "invalid_request", "请求体不是合法 JSON")
 		return
+	}
+	detail := ""
+	if req.SessionTTLHours != nil {
+		if *req.SessionTTLHours < 1 || *req.SessionTTLHours > 720 {
+			apiError(w, http.StatusBadRequest, "invalid_request", "会话时长需在 1～720 小时之间")
+			return
+		}
+		if err := s.db.SetSetting("session_ttl_hours", strconv.Itoa(*req.SessionTTLHours)); err != nil {
+			apiError(w, http.StatusInternalServerError, "server_error", "保存设置失败")
+			return
+		}
+		detail += fmt.Sprintf("会话时长=%dh ", *req.SessionTTLHours)
 	}
 	if req.FeishuAppID != "" {
 		if err := s.db.SetSetting("feishu_app_id", req.FeishuAppID); err != nil {
@@ -498,7 +515,11 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request, adm
 			apiError(w, http.StatusInternalServerError, "server_error", "保存设置失败")
 			return
 		}
+		detail += "飞书上游配置"
 	}
-	s.db.Audit(admin.Username, "settings_update", "飞书上游配置", clientIP(r))
+	if detail == "" {
+		detail = "无变更"
+	}
+	s.db.Audit(admin.Username, "settings_update", strings.TrimSpace(detail), clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"data": "ok"})
 }
