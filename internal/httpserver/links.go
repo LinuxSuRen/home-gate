@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/linuxsuren/home-gate/internal/model"
 )
@@ -133,6 +134,9 @@ func (s *Server) handleAdminDeleteLink(w http.ResponseWriter, r *http.Request, a
 		apiError(w, http.StatusInternalServerError, "server_error", "删除链接失败")
 		return
 	}
+	// 清理该链接的关注记录，避免遗留失效关注
+	s.db.Where("kind = ? AND ref = ?", "link", strconv.FormatUint(uint64(link.ID), 10)).
+		Delete(&model.Favorite{})
 	s.db.Audit(admin.Username, "link_delete", "name="+link.Name, clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"data": "ok"})
 }

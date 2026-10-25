@@ -36,7 +36,7 @@ func Open(path string) (*DB, error) {
 		&model.User{}, &model.Group{}, &model.Session{}, &model.Client{},
 		&model.InitialToken{}, &model.SigningKey{}, &model.AuthCode{},
 		&model.RefreshToken{}, &model.FeishuState{}, &model.AuditLog{}, &model.Setting{},
-		&model.AppLink{},
+		&model.AppLink{}, &model.Favorite{},
 	); err != nil {
 		return nil, err
 	}

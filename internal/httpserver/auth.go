@@ -306,8 +306,10 @@ func (s *Server) feishuExchangeLogin(r *http.Request, appID, appSecret, code str
 
 // handleApps 已接入系统入口卡片：OAuth 应用（DCR 注册的 portal_url）+ 纯链接入口。
 // 免登录可访问：未登录仅返回公开链接；登录后返回全部入口（隐私链接 + OAuth 应用）。
+// 登录用户的关注状态随入口一并返回（followed）。
 func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 	u := s.currentUser(r)
+	favLinks, favApps := s.favoritesOf(u)
 	apps := []portalApp{}
 	if u != nil {
 		clients, err := s.db.ListClients()
@@ -321,6 +323,7 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 					ClientID: c.ClientID, Name: c.Name,
 					Description: c.Description, LogoURL: c.LogoURL,
 					PortalURL: c.PortalURL, // 仅作跳转目标，不在卡片上展示
+					Followed:  favApps[c.ClientID],
 				})
 			}
 		}
@@ -338,12 +341,33 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 	links := []portalLink{}
 	for _, l := range linkRows {
 		links = append(links, portalLink{
-			Name: l.Name, Description: l.Description, LogoURL: l.LogoURL, URL: l.URL,
+			ID: l.ID, Name: l.Name, Description: l.Description, LogoURL: l.LogoURL, URL: l.URL,
+			Followed: favLinks[fmt.Sprintf("%d", l.ID)],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
 		"apps": apps, "links": links,
 	}})
+}
+
+// favoritesOf 读取用户关注集合；未登录返回空集。
+func (s *Server) favoritesOf(u *model.User) (links, apps map[string]bool) {
+	links, apps = map[string]bool{}, map[string]bool{}
+	if u == nil {
+		return
+	}
+	var favs []model.Favorite
+	if err := s.db.Where("user_id = ?", u.ID).Find(&favs).Error; err != nil {
+		return
+	}
+	for _, f := range favs {
+		if f.Kind == "link" {
+			links[f.Ref] = true
+		} else if f.Kind == "app" {
+			apps[f.Ref] = true
+		}
+	}
+	return
 }
 
 type portalApp struct {
@@ -352,11 +376,14 @@ type portalApp struct {
 	Description string `json:"description"`
 	LogoURL     string `json:"logo_url"`
 	PortalURL   string `json:"portal_url"` // 仅作跳转目标，不在卡片上展示
+	Followed    bool   `json:"followed"`
 }
 
 type portalLink struct {
+	ID          uint   `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	LogoURL     string `json:"logo_url"`
 	URL         string `json:"url"` // 跳转目标
+	Followed    bool   `json:"followed"`
 }

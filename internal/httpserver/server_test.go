@@ -574,6 +574,97 @@ func TestAppsVisibility(t *testing.T) {
 	}
 }
 
+// TestFavorites 门户关注：关注/取关链接与应用，/api/apps 返回 followed 状态；删除链接清理关注；非法目标 404。
+func TestFavorites(t *testing.T) {
+	s := newTestServer(t)
+	h := s.Handler()
+	adminHdr := loginAdmin(t, h)
+
+	// 准备：一个链接 + 一个 OAuth 应用
+	w, out := doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"看板","url":"https://grafana.example.com"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create link: %d %s", w.Code, w.Body.String())
+	}
+	linkID := fmt.Sprintf("%v", out["data"].(map[string]any)["id"])
+	w, out = doJSON(t, h, "POST", "/api/admin/clients",
+		`{"client_name":"media","redirect_uris":["https://media.test/cb"],"portal_url":"https://media.test"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create client: %d %s", w.Code, w.Body.String())
+	}
+	clientID := out["data"].(map[string]any)["client_id"].(string)
+
+	// 匿名 401
+	w, _ = doJSON(t, h, "GET", "/api/favorites", "", nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous favorites should 401, got %d", w.Code)
+	}
+
+	// 关注链接与应用（幂等：重复关注不新增）
+	for i := 0; i < 2; i++ {
+		w, _ = doJSON(t, h, "PUT", "/api/favorites/link/"+linkID, "", adminHdr)
+		if w.Code != http.StatusOK {
+			t.Fatalf("follow link: %d %s", w.Code, w.Body.String())
+		}
+	}
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/app/"+clientID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("follow app: %d %s", w.Code, w.Body.String())
+	}
+
+	// 关注列表
+	w, favs := doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list favorites: %d", w.Code)
+	}
+	if n := len(favs["data"].([]any)); n != 2 {
+		t.Fatalf("favorites should have 2 entries, got %v", favs["data"])
+	}
+
+	// /api/apps 带 followed 状态
+	w, apps := doJSON(t, h, "GET", "/api/apps", "", adminHdr)
+	appsData := apps["data"].(map[string]any)
+	l0 := appsData["links"].([]any)[0].(map[string]any)
+	a0 := appsData["apps"].([]any)[0].(map[string]any)
+	if l0["followed"] != true || a0["followed"] != true {
+		t.Fatalf("followed flags unexpected: link=%v app=%v", l0["followed"], a0["followed"])
+	}
+	if l0["id"] == nil {
+		t.Fatalf("link id missing in /api/apps: %v", l0)
+	}
+
+	// 非法目标：未知 kind / 不存在的链接
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/room/123", "", adminHdr)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unknown kind should 404, got %d", w.Code)
+	}
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/link/99999", "", adminHdr)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unknown link should 404, got %d", w.Code)
+	}
+
+	// 取关应用 → followed 变 false
+	w, _ = doJSON(t, h, "DELETE", "/api/favorites/app/"+clientID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unfollow app: %d %s", w.Code, w.Body.String())
+	}
+	w, apps = doJSON(t, h, "GET", "/api/apps", "", adminHdr)
+	a0 = apps["data"].(map[string]any)["apps"].([]any)[0].(map[string]any)
+	if a0["followed"] != false {
+		t.Fatalf("app followed should be false after unfollow, got %v", a0["followed"])
+	}
+
+	// 删除链接 → 关注记录被清理
+	w, _ = doJSON(t, h, "DELETE", "/api/admin/links/"+linkID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete link: %d %s", w.Code, w.Body.String())
+	}
+	w, favs = doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	if n := len(favs["data"].([]any)); n != 0 {
+		t.Fatalf("favorites should be cleaned after link deletion, got %v", favs["data"])
+	}
+}
+
 // TestSessionTimeout 管理员可配置登录会话超时时长：默认 24 小时；调整后新会话与 cookie 同步生效。
 func TestSessionTimeout(t *testing.T) {
 	s := newTestServer(t)
