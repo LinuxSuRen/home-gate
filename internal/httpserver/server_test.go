@@ -643,6 +643,28 @@ func TestFavorites(t *testing.T) {
 		t.Fatalf("unknown link should 404, got %d", w.Code)
 	}
 
+	// 门户不可见的目标不可关注：停用的链接、未配置入口地址的应用
+	w, out = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"停用看板","url":"https://off.example.com","active":false}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create inactive link: %d %s", w.Code, w.Body.String())
+	}
+	offID := fmt.Sprintf("%v", out["data"].(map[string]any)["id"])
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/link/"+offID, "", adminHdr)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("inactive link should 404, got %d", w.Code)
+	}
+	w, out = doJSON(t, h, "POST", "/api/admin/clients",
+		`{"client_name":"noportal","redirect_uris":["https://np.test/cb"]}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create client without portal_url: %d %s", w.Code, w.Body.String())
+	}
+	noPortalID := out["data"].(map[string]any)["client_id"].(string)
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/app/"+noPortalID, "", adminHdr)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("app without portal_url should 404, got %d", w.Code)
+	}
+
 	// 取关应用 → followed 变 false
 	w, _ = doJSON(t, h, "DELETE", "/api/favorites/app/"+clientID, "", adminHdr)
 	if w.Code != http.StatusOK {

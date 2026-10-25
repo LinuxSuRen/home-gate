@@ -22,7 +22,8 @@ func (s *Server) handleListFavorites(w http.ResponseWriter, r *http.Request, u *
 	writeJSON(w, http.StatusOK, map[string]any{"data": favs})
 }
 
-// followTarget 校验关注目标存在性：link → ref 为链接 id；app → ref 为 client_id。
+// followTarget 校验关注目标存在且在门户中可见：
+// link → ref 为启用中的链接 id；app → ref 为启用且配置了入口地址的 client_id。
 func (s *Server) followTarget(kind, ref string) bool {
 	switch kind {
 	case "link":
@@ -31,10 +32,10 @@ func (s *Server) followTarget(kind, ref string) bool {
 			return false
 		}
 		var link model.AppLink
-		return s.db.First(&link, id).Error == nil
+		return s.db.Where("active = ?", true).First(&link, id).Error == nil
 	case "app":
-		_, err := s.db.FindClient(ref)
-		return err == nil
+		c, err := s.db.FindClient(ref)
+		return err == nil && c.Active && c.PortalURL != ""
 	}
 	return false
 }
