@@ -263,6 +263,9 @@ func (s *Server) handleAdminCreateClient(w http.ResponseWriter, r *http.Request,
 		apiError(w, http.StatusBadRequest, "invalid_client_metadata", err.Error())
 		return
 	}
+	// 查重与写入串行化，防止并发创建撞名（跨客户端/链接两表全局唯一）
+	s.subdomainMu.Lock()
+	defer s.subdomainMu.Unlock()
 	subdomain, err := s.normalizeSubdomain(meta.Subdomain)
 	if err != nil {
 		apiError(w, http.StatusBadRequest, "invalid_subdomain", err.Error())
@@ -345,19 +348,27 @@ func (s *Server) handleAdminUpdateClient(w http.ResponseWriter, r *http.Request,
 	if req.LogoURL != nil {
 		updates["logo_url"] = *req.LogoURL
 	}
+	subdomainChanged := false
 	if req.Subdomain != nil {
 		subdomain, err := s.normalizeSubdomain(*req.Subdomain)
 		if err != nil {
 			apiError(w, http.StatusBadRequest, "invalid_subdomain", err.Error())
 			return
 		}
-		if s.subdomainTaken(subdomain, c.ID, 0) {
-			apiError(w, http.StatusBadRequest, "subdomain_taken", "子域名 "+subdomain+" 已被其他服务占用")
-			return
-		}
 		updates["subdomain"] = subdomain
+		subdomainChanged = true
 	}
 	if len(updates) > 0 {
+		if subdomainChanged {
+			// 查重与写入串行化（与创建路径同一把锁），窗口期内不释放，防止并发撞名
+			s.subdomainMu.Lock()
+			defer s.subdomainMu.Unlock()
+			if s.subdomainTaken(updates["subdomain"].(string), c.ID, 0) {
+				apiError(w, http.StatusBadRequest, "subdomain_taken",
+					"子域名 "+updates["subdomain"].(string)+" 已被其他服务占用")
+				return
+			}
+		}
 		if err := s.db.Model(&c).Updates(updates).Error; err != nil {
 			apiError(w, http.StatusInternalServerError, "server_error", "更新客户端失败")
 			return
@@ -541,6 +552,7 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request, adm
 			apiError(w, http.StatusInternalServerError, "server_error", "保存设置失败")
 			return
 		}
+		s.invalidatePortalDomainCache() // 子站路由的域名缓存随设置立即生效
 		detail += "门户域名=" + domain + " "
 	}
 	if req.FeishuAppID != "" {

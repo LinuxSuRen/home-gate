@@ -20,6 +20,11 @@ import (
 const testIssuer = "https://gate.test"
 
 func newTestServer(t *testing.T) *Server {
+	return newTestServerIssuer(t, testIssuer)
+}
+
+// newTestServerIssuer 以指定 issuer 构造测试服务（子站保留标签等逻辑依赖 issuer 宿主）。
+func newTestServerIssuer(t *testing.T, issuer string) *Server {
 	t.Helper()
 	db, err := store.Open(t.TempDir() + "/gate.db")
 	if err != nil {
@@ -35,7 +40,7 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("token manager: %v", err)
 	}
-	return New(db, tm, testIssuer)
+	return New(db, tm, issuer)
 }
 
 // doJSON 执行 JSON 请求并返回响应与解析结果。

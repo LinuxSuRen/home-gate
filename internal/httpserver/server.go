@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/linuxsuren/home-gate/internal/model"
 	"github.com/linuxsuren/home-gate/internal/store"
@@ -21,6 +22,11 @@ type Server struct {
 	tm     *token.Manager
 	issuer string // 外部可达的基础地址，如 https://gate.example.com
 	mux    *http.ServeMux
+
+	pdMu        sync.RWMutex // 门户域名缓存的读写锁
+	pdCache     string       // 子站路由的门户域名缓存（每个请求都会读取，避免每次查库）
+	pdLoaded    bool         // 缓存是否已从设置加载
+	subdomainMu sync.Mutex   // 串行化子站标签的查重与写入，防止并发注册撞名
 }
 
 func New(db *store.DB, tm *token.Manager, issuer string) *Server {

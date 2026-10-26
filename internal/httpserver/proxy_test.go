@@ -218,3 +218,110 @@ func TestSubdomainFallbackAndValidation(t *testing.T) {
 		t.Fatalf("print subsite should still work after DCR attempt, got %d", rec.Code)
 	}
 }
+
+// TestSubdomainLoopProtection 门户域内的主机一律不得作为子站上游：
+// 跨子站互指（a→b、b→a）会把单个请求放大为无限代理链；上游为门户域名本身同样拒绝。
+// 响应体不回显上游地址（避免向匿名访客泄漏拓扑），细节只进服务端日志。
+func TestSubdomainLoopProtection(t *testing.T) {
+	s := newTestServer(t)
+	h := s.Handler()
+	adminHdr := loginAdmin(t, h)
+
+	w, _ := doJSON(t, h, "PUT", "/api/admin/settings", `{"portal_domain":"tech.abc.com"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set portal domain: %d %s", w.Code, w.Body.String())
+	}
+
+	// 子站 a 与 b 互指（泛解析下两个主机都会回到 gate）
+	w, _ = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"a","url":"http://b.tech.abc.com","subdomain":"a"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create link a: %d %s", w.Code, w.Body.String())
+	}
+	w, _ = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"b","url":"http://a.tech.abc.com","subdomain":"b"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create link b: %d %s", w.Code, w.Body.String())
+	}
+	// 上游为门户域名本身
+	w, _ = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"self","url":"http://tech.abc.com:8080","subdomain":"self"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create portal-self link: %d %s", w.Code, w.Body.String())
+	}
+
+	for _, host := range []string{"a.tech.abc.com", "b.tech.abc.com", "self.tech.abc.com"} {
+		rec := doHostReq(h, "GET", "http://"+host+"/")
+		if rec.Code != http.StatusBadGateway {
+			t.Fatalf("in-domain upstream %s should 502, got %d", host, rec.Code)
+		}
+		if body := rec.Body.String(); strings.Contains(body, "tech.abc.com") {
+			t.Fatalf("error body should not echo the upstream host: %s", body)
+		}
+	}
+}
+
+// TestSubdomainReservedLabel issuer 宿主位于门户域内时，其首标签禁止注册为子站，
+// 防止子站抢占 issuer 主机、把发往门户/OAuth 端点的流量反代走导致登录静默失效。
+func TestSubdomainReservedLabel(t *testing.T) {
+	s := newTestServerIssuer(t, "https://tech.abc.com") // issuer 宿主在 abc.com 之下
+	h := s.Handler()
+	adminHdr := loginAdmin(t, h)
+
+	upstream := echoUpstream(t)
+	w, _ := doJSON(t, h, "PUT", "/api/admin/settings", `{"portal_domain":"abc.com"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set portal domain: %d %s", w.Code, w.Body.String())
+	}
+
+	// issuer 的首标签 tech 不可注册；普通标签不受影响
+	w, _ = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"hijack","url":"`+upstream.URL+`","subdomain":"tech"}`, adminHdr)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("issuer label should be reserved, got %d %s", w.Code, w.Body.String())
+	}
+	w, _ = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"ok","url":"`+upstream.URL+`","subdomain":"license"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("normal label should be accepted: %d %s", w.Code, w.Body.String())
+	}
+	// issuer 主机自身仍走门户原路由（未被劫持）
+	if rec := doHostReq(h, "GET", "http://tech.abc.com/healthz"); rec.Code != http.StatusOK {
+		t.Fatalf("issuer host should still serve the portal, got %d", rec.Code)
+	}
+}
+
+// TestSubdomainDomainSwitch 修改门户域名后缓存立即失效：
+// 旧域名主机回退门户 SPA，新域名下的同标签子站即时生效。
+func TestSubdomainDomainSwitch(t *testing.T) {
+	s := newTestServer(t)
+	h := s.Handler()
+	adminHdr := loginAdmin(t, h)
+
+	upstream := echoUpstream(t)
+	w, _ := doJSON(t, h, "PUT", "/api/admin/settings", `{"portal_domain":"one.test.org"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("set domain: %d %s", w.Code, w.Body.String())
+	}
+	w, _ = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"svc","url":"`+upstream.URL+`","subdomain":"svc"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create link: %d %s", w.Code, w.Body.String())
+	}
+	if rec := doHostReq(h, "GET", "http://svc.one.test.org/p"); rec.Code != http.StatusOK {
+		t.Fatalf("subsite should proxy before domain switch, got %d", rec.Code)
+	}
+
+	// 切换门户域名：旧主机不再按子站处理，新域名下的子站立即生效
+	w, _ = doJSON(t, h, "PUT", "/api/admin/settings", `{"portal_domain":"two.test.org"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("switch domain: %d %s", w.Code, w.Body.String())
+	}
+	if rec := doHostReq(h, "GET", "http://svc.one.test.org/p"); rec.Code != http.StatusOK {
+		t.Fatalf("old-domain host should fall back to portal SPA, got %d", rec.Code)
+	}
+	if rec := doHostReq(h, "GET", "http://svc.two.test.org/p"); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), "path=/p") {
+		t.Fatalf("subsite should proxy on the new domain immediately: %d %s", rec.Code, rec.Body.String())
+	}
+}
