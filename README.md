@@ -1,5 +1,9 @@
 # home-gate
 
+<p align="center">
+  <img src="web/public/logo.svg" width="120" alt="home-gate logo" />
+</p>
+
 [![CI](https://github.com/linuxsuren/home-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/linuxsuren/home-gate/actions/workflows/ci.yml)
 [![Release](https://github.com/linuxsuren/home-gate/actions/workflows/release.yml/badge.svg)](https://github.com/linuxsuren/home-gate/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
