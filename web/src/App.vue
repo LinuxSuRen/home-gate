@@ -222,6 +222,9 @@ async function handleChangePwd() {
   margin-right: 16px;
   color: var(--color-text-dim);
 }
+.gh-link:hover {
+  color: var(--color-accent);
+}
 .gh-link__icon {
   width: 18px;
   height: 18px;
