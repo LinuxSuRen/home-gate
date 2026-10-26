@@ -63,7 +63,8 @@ type Client struct {
 	RedirectURIs            string    `gorm:"type:text" json:"-"` // JSON 数组
 	Scopes                  string    `gorm:"size:512" json:"scopes"`
 	TokenEndpointAuthMethod string    `gorm:"size:32" json:"token_endpoint_auth_method"` // client_secret_basic / client_secret_post / none
-	PortalURL               string    `gorm:"size:512" json:"portal_url"`                // 门户入口页跳转地址（DCR 扩展字段）
+	PortalURL               string    `gorm:"size:512" json:"portal_url"`                // 门户入口页跳转地址（DCR 扩展字段）；配置子域名时兼作回源地址
+	Subdomain               string    `gorm:"index;size:64" json:"subdomain"`            // 子站标签（可选），如 license → license.<门户域名>
 	Description             string    `gorm:"size:256" json:"description"`               // 应用描述（门户卡片展示）
 	LogoURL                 string    `gorm:"size:512" json:"logo_url"`                  // 应用 logo 地址（门户卡片展示）
 	GroupsMap               string    `gorm:"type:text" json:"-"`                        // JSON: gate 组名 -> 子系统角色
@@ -80,7 +81,8 @@ type AppLink struct {
 	Name        string    `gorm:"size:128" json:"name"`
 	Description string    `gorm:"size:256" json:"description"`
 	LogoURL     string    `gorm:"size:512" json:"logo_url"`
-	URL         string    `gorm:"size:512" json:"url"` // 跳转地址
+	URL         string    `gorm:"size:512" json:"url"` // 跳转地址；配置子域名时兼作回源地址
+	Subdomain   string    `gorm:"index;size:64" json:"subdomain"` // 子站标签（可选），如 license → license.<门户域名>
 	Sort        int       `json:"sort"`                // 越小越靠前
 	Active      bool      `json:"active"`
 	CreatedAt   time.Time `json:"created_at"`
