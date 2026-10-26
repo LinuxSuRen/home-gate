@@ -136,6 +136,14 @@ func (s *Server) requireSession(next func(w http.ResponseWriter, r *http.Request
 
 func (s *Server) requireAdmin(next func(w http.ResponseWriter, r *http.Request, u *model.User)) http.HandlerFunc {
 	return s.requireSession(func(w http.ResponseWriter, r *http.Request, u *model.User) {
+		// CSRF 纵深防御：变更型管理接口要求自定义请求头。
+		// 浏览器跨站表单/简单请求无法携带自定义头，配合 SameSite=Lax 双重防护。
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if r.Header.Get("X-Requested-With") == "" {
+				apiError(w, http.StatusForbidden, "csrf_required", "缺少 X-Requested-With 请求头")
+				return
+			}
+		}
 		if !u.HasGroup("admin") {
 			apiError(w, http.StatusForbidden, "forbidden", "需要管理员权限")
 			return

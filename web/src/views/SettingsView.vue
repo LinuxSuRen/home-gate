@@ -51,7 +51,8 @@ async function doUpgrade() {
   const target = updateInfo.value && updateInfo.value.latest
   try {
     await ElMessageBox.confirm(
-      `将升级到 ${target || '最新版本'}，下载完成后服务会自动重启，期间短暂不可访问（约数秒）。`,
+      `将升级到 ${target || '最新版本'}。下载与完整性校验可能需要数分钟，期间请勿关闭页面；` +
+        '完成后服务自动重启，短暂不可访问属正常现象。',
       '一键升级',
       { type: 'warning' },
     )
@@ -61,8 +62,18 @@ async function doUpgrade() {
   upgrading.value = true
   try {
     const res = await upgrade()
-    ElMessage.success(`已升级到 ${res.upgraded_to || target || '新版本'}，服务重启中…`)
-    setTimeout(() => location.reload(), 8000)
+    ElMessage.success(`已升级到 ${res.upgraded_to || target || '新版本'}，等待服务重启完成…`)
+    // 服务重启期间不可达：轮询 /healthz 直到恢复（最长约 1 分钟）再刷新页面
+    for (let i = 0; i < 30; i++) {
+      try {
+        const resp = await fetch('/healthz', { cache: 'no-store' })
+        if (resp.ok) break
+      } catch {
+        /* 重启中，继续等待 */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+    location.reload()
   } catch (e) {
     ElMessage.error(e.message)
     upgrading.value = false

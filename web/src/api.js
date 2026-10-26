@@ -1,4 +1,5 @@
 // 统一 HTTP 封装：超时、网络错误包装、错误 envelope 解包。
+// 非 GET 请求自动携带 X-Requested-With（管理端变更接口的 CSRF 纵深防御要求）。
 export class ApiError extends Error {
   constructor(message, code) {
     super(message)
@@ -6,14 +7,18 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, options = {}) {
+async function request(path, options = {}, timeoutMs = 15000) {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 15000)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const method = (options.method || 'GET').toUpperCase()
   try {
     const resp = await fetch(path, {
       ...options,
       signal: controller.signal,
       headers: {
+        ...(method !== 'GET' && method !== 'HEAD'
+          ? { 'X-Requested-With': 'XMLHttpRequest' }
+          : {}),
         ...(options.body ? { 'Content-Type': 'application/json' } : {}),
         ...(options.headers || {}),
       },
@@ -122,4 +127,6 @@ export const saveSettings = (settings) =>
 // ---- 版本与自更新 ----
 export const getVersion = () => request('/api/version')
 export const checkUpdate = () => request('/api/admin/update/check')
-export const upgrade = () => request('/api/admin/upgrade', { method: 'POST' })
+// 升级在服务端同步完成下载 + SHA256 校验 + 替换，慢链路下可达数分钟：
+// 前端以 6 分钟超时等待（服务端下载超时为 5 分钟），成功后页面短暂不可用属预期。
+export const upgrade = () => request('/api/admin/upgrade', { method: 'POST' }, 360000)

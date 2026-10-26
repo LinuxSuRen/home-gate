@@ -33,6 +33,14 @@ jobs:
             set -- $os_arch
             CGO_ENABLED=0 GOOS=$1 GOARCH=$2 go build -trimpath -ldflags="-s -w -X github.com/linuxsuren/home-gate/internal/version.Version=${GITHUB_REF_NAME}" -o "dist/home-gate-$1-$2" .
           done
+      # 每个产物生成 .sha256 校验文件（sha256sum 标准格式），供内置自更新强制校验
+      - name: Generate checksums
+        run: |
+          cd dist
+          for f in home-gate-*; do
+            sha256sum "$f" > "$f.sha256"
+          done
+          ls -l
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:

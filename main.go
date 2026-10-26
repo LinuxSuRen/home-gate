@@ -22,10 +22,23 @@ func main() {
 	dataDir := flag.String("data", "./data", "数据目录（SQLite）")
 	issuer := flag.String("issuer", "", "外部可达基础地址（如 https://gate.example.com），默认按请求 Host 推断")
 	showVersion := flag.Bool("version", false, "打印版本并退出")
+	// 自更新回滚看门狗（由旧版进程在升级重启前拉起，正常部署无需关心）
+	watchAddr := flag.String("upgrade-watch-addr", "", "内部参数：看门狗探测新进程健康的地址")
+	watchExe := flag.String("upgrade-watch-exe", "", "内部参数：看门狗负责回滚的可执行文件")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println(version.Version)
+		return
+	}
+
+	if *watchAddr != "" {
+		// 原服务启动参数经环境变量透传（\x00 分隔），回滚时按原参数拉起旧版
+		var origArgs []string
+		if env := os.Getenv("GATE_UPGRADE_ARGS"); env != "" {
+			origArgs = strings.Split(env, "\x00")
+		}
+		httpserver.RunUpgradeWatchdog(*watchAddr, *watchExe, origArgs)
 		return
 	}
 
