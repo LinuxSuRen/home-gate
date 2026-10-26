@@ -25,7 +25,7 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	// 娴嬭瘯缁撴潫鍏抽棴杩炴帴姹狅紝閲婃斁 SQLite 鏂囦欢鍙ユ焺锛堝惁鍒?Windows 涓?t.TempDir 娓呯悊浼氬け璐ワ級
+	// 测试结束关闭连接池，释放 SQLite 文件句柄（否则 Windows 上 t.TempDir 清理会失败）
 	t.Cleanup(func() {
 		if sqlDB, err := db.DB.DB(); err == nil {
 			_ = sqlDB.Close()
@@ -38,7 +38,7 @@ func newTestServer(t *testing.T) *Server {
 	return New(db, tm, testIssuer)
 }
 
-// doJSON 鎵ц JSON 璇锋眰骞惰繑鍥炲搷搴斾笌瑙ｆ瀽缁撴灉銆?
+// doJSON 执行 JSON 请求并返回响应与解析结果。
 func doJSON(t *testing.T, h http.Handler, method, path, body string, header map[string]string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -77,7 +77,7 @@ func issueInitialToken(t *testing.T, h http.Handler, hdr map[string]string) stri
 	return data["token"].(string)
 }
 
-// TestFeishuEnabledProbe 鏈厤缃涔︽椂鎺㈡祴鎺ュ彛搴旇繑鍥?enabled=false锛堢櫥褰曢〉鎹闅愯棌鍏ュ彛锛夈€?
+// TestFeishuEnabledProbe 未配置飞书时探测接口应返回 enabled=false（登录页据此隐藏入口）。
 func TestFeishuEnabledProbe(t *testing.T) {
 	s := newTestServer(t)
 	w, out := doJSON(t, s.Handler(), "GET", "/api/auth/feishu/enabled", "", nil)
@@ -90,15 +90,15 @@ func TestFeishuEnabledProbe(t *testing.T) {
 	}
 }
 
-// TestFullFlow 瑕嗙洊锛氱櫥褰?鈫?DCR 娉ㄥ唽 鈫?鎺堟潈锛圫SO 闈欓粯鏀捐锛夆啋 鎹?token 鈫?userinfo 鈫?鍒锋柊銆?
+// TestFullFlow 覆盖：登录 → DCR 注册 → 授权（SSO 静默放行）→ 换 token → userinfo → 刷新。
 func TestFullFlow(t *testing.T) {
 	s := newTestServer(t)
 	h := s.Handler()
 
-	// 1. 绠＄悊鍛樼櫥褰?
+	// 1. 管理员登录
 	adminHdr := loginAdmin(t, h)
 
-	// 2. 绛惧彂 initial token 骞?DCR 娉ㄥ唽瀹㈡埛绔?
+	// 2. 签发 initial token 并 DCR 注册客户端
 	it := issueInitialToken(t, h, adminHdr)
 	dcrBody := `{
 		"client_name":"demo-app",
@@ -117,26 +117,26 @@ func TestFullFlow(t *testing.T) {
 	clientSecret := reg["client_secret"].(string)
 	regToken := reg["registration_access_token"].(string)
 
-	// 3. RFC 7592 鏌ヨ娉ㄥ唽淇℃伅
+	// 3. RFC 7592 查询注册信息
 	w, _ = doJSON(t, h, "GET", "/oauth2/register/"+clientID, "",
 		map[string]string{"Authorization": "Bearer " + regToken})
 	if w.Code != http.StatusOK {
 		t.Fatalf("dcr get: %d %s", w.Code, w.Body.String())
 	}
-	// 鏃犲嚟鎹鎷?
+	// 无凭据被拒
 	w, _ = doJSON(t, h, "GET", "/oauth2/register/"+clientID, "", nil)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("dcr get without token should 401, got %d", w.Code)
 	}
 
-	// 4. 淇敼绠＄悊鍛樺瘑鐮侊紙鎺堟潈鍓嶈姹傦級
+	// 4. 修改管理员密码（授权前要求）
 	w, _ = doJSON(t, h, "POST", "/api/auth/change-password",
 		`{"old_password":"admin123","new_password":"newpass123"}`, adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("change password: %d %s", w.Code, w.Body.String())
 	}
 
-	// 5. 鎺堟潈锛堝甫浼氳瘽 鈫?SSO 闈欓粯鍙戠爜锛?
+	// 5. 授权（带会话 → SSO 静默发码）
 	state := "st-123"
 	nonce := "n-123"
 	authURL := "/oauth2/authorize?" + url.Values{
@@ -160,7 +160,7 @@ func TestFullFlow(t *testing.T) {
 	}
 	code := loc.Query().Get("code")
 
-	// 6. 鏈敞鍐屽洖璋冨湴鍧€琚嫆
+	// 6. 未注册回调地址被拒
 	bad := "/oauth2/authorize?" + url.Values{
 		"response_type": {"code"}, "client_id": {clientID},
 		"redirect_uri":  {"https://evil.test/oauth/callback"},
@@ -177,12 +177,12 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("bad redirect_uri should be rejected, got %v %s", rec.Code, rec.Header().Get("Location"))
 	}
 
-	// 7. 鎺堟潈鐮佹崲 token锛坆asic auth锛?
+	// 7. 授权码换 token（basic auth）
 	verifier := "test-verifier-012345678901234567890123456789"
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
-	// 鎺堟潈鐮佺鍙戞椂鏈甫 PKCE锛宑onfidential 瀹㈡埛绔彲涓嶅甫 鈥斺€?浣嗛渶涓庣鍙戜竴鑷达紱
-	// 杩欓噷閲嶆柊璧颁竴娆″甫 PKCE 鐨勬巿鏉冩嬁鏂扮爜銆?
+	// 授权码签发时未带 PKCE，confidential 客户端可不带 —— 但需与签发一致；
+	// 这里重新走一次带 PKCE 的授权拿新码。
 	authURL2 := authURL + "&code_challenge=" + url.QueryEscape(challenge) + "&code_challenge_method=S256"
 	req = httptest.NewRequest("GET", authURL2, nil)
 	for k, v := range adminHdr {
@@ -218,7 +218,7 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("token response missing fields: %v", tok)
 	}
 
-	// 鎺堟潈鐮侀噸鏀捐鎷?
+	// 授权码重放被拒
 	req = httptest.NewRequest("POST", "/oauth2/token", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(clientID, clientSecret)
@@ -246,7 +246,7 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("userinfo groups = %v", groups)
 	}
 
-	// 9. 鍒锋柊浠ょ墝锛堣疆鎹級
+	// 9. 刷新令牌（轮换）
 	form2 := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}}
 	req = httptest.NewRequest("POST", "/oauth2/token", strings.NewReader(form2.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -262,7 +262,7 @@ func TestFullFlow(t *testing.T) {
 	if newRefresh == "" || newRefresh == refresh {
 		t.Fatalf("refresh token should rotate: %v", tok2)
 	}
-	// 鏃?refresh token 澶辨晥
+	// 旧 refresh token 失效
 	req = httptest.NewRequest("POST", "/oauth2/token", strings.NewReader(form2.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.SetBasicAuth(clientID, clientSecret)
@@ -272,7 +272,7 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("old refresh token should fail, got %d", rec.Code)
 	}
 
-	// 10. OIDC 鍙戠幇涓?JWKS
+	// 10. OIDC 发现与 JWKS
 	w, disc := doJSON(t, h, "GET", "/.well-known/openid-configuration", "", nil)
 	if w.Code != http.StatusOK || disc["issuer"] != testIssuer {
 		t.Fatalf("discovery: %d %v", w.Code, disc["issuer"])
@@ -287,7 +287,7 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("jwks key unexpected: %v", k0)
 	}
 
-	// 11. 瀹¤宸叉湁璁板綍
+	// 11. 审计已有记录
 	w, audit := doJSON(t, h, "GET", "/api/admin/audit?page=1&page_size=50", "", adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("audit: %d %s", w.Code, w.Body.String())
@@ -296,7 +296,7 @@ func TestFullFlow(t *testing.T) {
 		t.Fatalf("audit too few entries: %v", audit["total"])
 	}
 
-	// 12. 鐧诲嚭
+	// 12. 登出
 	req = httptest.NewRequest("GET", "/oauth2/logout?post_logout_redirect_uri=https://notify.test/", nil)
 	for k, v := range adminHdr {
 		req.Header.Set(k, v)
@@ -309,7 +309,7 @@ func TestFullFlow(t *testing.T) {
 
 }
 
-// TestAdminCreateClient 绠＄悊鍛樹唬绗笁鏂圭郴缁熺洿鎺ユ敞鍐屽鎴风銆?
+// TestAdminCreateClient 管理员代第三方系统直接注册客户端。
 func TestAdminCreateClient(t *testing.T) {
 	s := newTestServer(t)
 	h := s.Handler()
@@ -325,7 +325,7 @@ func TestAdminCreateClient(t *testing.T) {
 		t.Fatalf("create client response missing credentials: %v", data)
 	}
 
-	// 鍑虹幇鍦ㄥ鎴风鍒楄〃涓斿惎鐢?
+	// 出现在客户端列表且启用
 	w, list := doJSON(t, h, "GET", "/api/admin/clients", "", adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("list clients: %d", w.Code)
@@ -341,14 +341,14 @@ func TestAdminCreateClient(t *testing.T) {
 		t.Fatalf("created client not found in list")
 	}
 
-	// 闈炵鐞嗗憳 403
+	// 非管理员 403
 	w, _ = doJSON(t, h, "POST", "/api/admin/clients", body, nil)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated create should 401, got %d", w.Code)
 	}
 }
 
-// TestPublicClientPKCE 鍏叡瀹㈡埛绔紙auth method none锛夊繀椤?PKCE銆?
+// TestPublicClientPKCE 公共客户端（auth method none）必须 PKCE。
 func TestPublicClientPKCE(t *testing.T) {
 	s := newTestServer(t)
 	h := s.Handler()
@@ -368,7 +368,7 @@ func TestPublicClientPKCE(t *testing.T) {
 		t.Fatalf("public client should not get secret")
 	}
 
-	// 鏃?PKCE 鐨勬巿鏉冭姹傝鎷?
+	// 无 PKCE 的授权请求被拒
 	authURL := "/oauth2/authorize?" + url.Values{
 		"response_type": {"code"}, "client_id": {clientID},
 		"redirect_uri": {"https://license.test/oidc/callback"}, "scope": {"openid"},
@@ -385,7 +385,7 @@ func TestPublicClientPKCE(t *testing.T) {
 	}
 }
 
-// TestAuthorizeRedirectsToLogin 鏈櫥褰曟椂鎺堟潈绔偣璺崇櫥褰曢〉銆?
+// TestAuthorizeRedirectsToLogin 未登录时授权端点跳登录页。
 func TestAuthorizeRedirectsToLogin(t *testing.T) {
 	s := newTestServer(t)
 	h := s.Handler()
@@ -396,7 +396,7 @@ func TestAuthorizeRedirectsToLogin(t *testing.T) {
 	_ = reg
 }
 
-// TestFeishuAutoProvision 椋炰功涓婃父鏈厤缃椂鎻愮ず鏈惎鐢ㄣ€?
+// TestFeishuAutoProvision 飞书上游未配置时提示未启用。
 func TestFeishuDisabled(t *testing.T) {
 	s := newTestServer(t)
 	h := s.Handler()
@@ -408,13 +408,13 @@ func TestFeishuDisabled(t *testing.T) {
 	}
 }
 
-// TestLinkCRUD 绠＄悊绔函閾炬帴搴旂敤绠＄悊锛氬垱寤?鈫?/api/apps 杩斿洖 links 鈫?鏇存柊/鍒犻櫎鐢熸晥锛涢潪绠＄悊鍛?403銆?
+// TestLinkCRUD 管理端纯链接应用管理：创建 → /api/apps 返回 links → 更新/删除生效；非管理员 403。
 func TestLinkCRUD(t *testing.T) {
 	s := newTestServer(t)
 	h := s.Handler()
 	adminHdr := loginAdmin(t, h)
 
-	// 闈炵鐞嗗憳 403锛氬厛鍒涘缓涓€涓潪绠＄悊鍛樼敤鎴峰啀鐧诲綍
+	// 非管理员 403：先创建一个非管理员用户再登录
 	w, _ := doJSON(t, h, "POST", "/api/admin/users",
 		`{"username":"bob","password":"bob1234567","groups":["view"]}`, adminHdr)
 	if w.Code != http.StatusOK {
@@ -427,22 +427,22 @@ func TestLinkCRUD(t *testing.T) {
 		t.Fatalf("bob should be forbidden from admin links api, got %d", w.Code)
 	}
 
-	// name/url 蹇呭～
+	// name/url 必填
 	w, _ = doJSON(t, h, "POST", "/api/admin/links", `{"name":"","url":""}`, adminHdr)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("create link without name/url should 400, got %d", w.Code)
 	}
 
-	// 鍒涘缓
+	// 创建
 	w, out := doJSON(t, h, "POST", "/api/admin/links",
-		`{"name":"鐩戞帶澶х洏","url":"https://grafana.example.com","description":"鎸囨爣鐪嬫澘","sort":1}`, adminHdr)
+		`{"name":"监控大盘","url":"https://grafana.example.com","description":"指标看板","sort":1}`, adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("create link: %d %s", w.Code, w.Body.String())
 	}
 	data := out["data"].(map[string]any)
 	lid := fmt.Sprintf("%v", data["id"])
 
-	// /api/apps 杩斿洖 links
+	// /api/apps 返回 links
 	w, apps := doJSON(t, h, "GET", "/api/apps", "", adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("apps: %d %s", w.Code, w.Body.String())
@@ -453,16 +453,16 @@ func TestLinkCRUD(t *testing.T) {
 		t.Fatalf("apps links = %v", links)
 	}
 	l0 := links[0].(map[string]any)
-	if l0["name"] != "鐩戞帶澶х洏" || l0["url"] != "https://grafana.example.com" {
+	if l0["name"] != "监控大盘" || l0["url"] != "https://grafana.example.com" {
 		t.Fatalf("apps link unexpected: %v", l0)
 	}
 	if _, ok := appsData["apps"].([]any); !ok {
 		t.Fatalf("apps field missing: %v", appsData)
 	}
 
-	// 鏇存柊
+	// 更新
 	w, _ = doJSON(t, h, "PUT", "/api/admin/links/"+lid,
-		`{"name":"鐩戞帶澶х洏2","active":false}`, adminHdr)
+		`{"name":"监控大盘2","active":false}`, adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("update link: %d %s", w.Code, w.Body.String())
 	}
@@ -472,18 +472,18 @@ func TestLinkCRUD(t *testing.T) {
 	}
 	rows := list["data"].([]any)
 	r0 := rows[0].(map[string]any)
-	if r0["name"] != "鐩戞帶澶х洏2" || r0["active"] != false {
+	if r0["name"] != "监控大盘2" || r0["active"] != false {
 		t.Fatalf("updated link unexpected: %v", r0)
 	}
 
-	// 鍋滅敤鍚?/api/apps 涓嶅啀杩斿洖
+	// 停用后 /api/apps 不再返回
 	w, apps = doJSON(t, h, "GET", "/api/apps", "", adminHdr)
 	appsData = apps["data"].(map[string]any)
 	if n := len(appsData["links"].([]any)); n != 0 {
 		t.Fatalf("inactive link should be hidden, got %d", n)
 	}
 
-	// 鍒犻櫎
+	// 删除
 	w, _ = doJSON(t, h, "DELETE", "/api/admin/links/"+lid, "", adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("delete link: %d %s", w.Code, w.Body.String())
@@ -494,28 +494,28 @@ func TestLinkCRUD(t *testing.T) {
 	}
 }
 
-// TestAppsVisibility 闂ㄦ埛鍏嶇櫥褰曟祻瑙堜笌閾炬帴鍙鎬э細
-// 鍖垮悕浠呰鍏紑閾炬帴锛堟棤 OAuth 搴旂敤鍏ュ彛锛夛紱鐧诲綍鍚庯紙鍚潪绠＄悊鍛橈級鍙闅愮閾炬帴涓庡叏閮ㄥ叆鍙ｃ€?
+// TestAppsVisibility 门户免登录浏览与链接可见性：
+// 匿名仅见公开链接（无 OAuth 应用入口）；登录后（含非管理员）可见隐私链接与全部入口。
 func TestAppsVisibility(t *testing.T) {
 	s := newTestServer(t)
 	h := s.Handler()
 	adminHdr := loginAdmin(t, h)
 
-	// OAuth 搴旂敤锛堝甫 portal_url锛屽嚭鐜板湪闂ㄦ埛鍗＄墖锛?
+	// OAuth 应用（带 portal_url，出现在门户卡片）
 	w, _ := doJSON(t, h, "POST", "/api/admin/clients",
 		`{"client_name":"media","redirect_uris":["https://media.test/cb"],"portal_url":"https://media.test"}`, adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("create client: %d %s", w.Code, w.Body.String())
 	}
 
-	// 鍏紑閾炬帴涓庨殣绉侀摼鎺ワ紙缂虹渷涓洪殣绉侊級鍚勪竴
+	// 公开链接与隐私链接（缺省为隐私）各一
 	w, _ = doJSON(t, h, "POST", "/api/admin/links",
-		`{"name":"鍏紑鐪嬫澘","url":"https://pub.example.com","public":true}`, adminHdr)
+		`{"name":"公开看板","url":"https://pub.example.com","public":true}`, adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("create public link: %d %s", w.Code, w.Body.String())
 	}
 	w, out := doJSON(t, h, "POST", "/api/admin/links",
-		`{"name":"闅愮鍚庡彴","url":"https://priv.example.com"}`, adminHdr)
+		`{"name":"隐私后台","url":"https://priv.example.com"}`, adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("create private link: %d %s", w.Code, w.Body.String())
 	}
@@ -529,20 +529,20 @@ func TestAppsVisibility(t *testing.T) {
 		return names
 	}
 
-	// 鍖垮悕锛?00锛屼粎鍏紑閾炬帴锛屾棤 apps
+	// 匿名：200，仅公开链接，无 apps
 	w, apps := doJSON(t, h, "GET", "/api/apps", "", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("anonymous apps should be 200, got %d %s", w.Code, w.Body.String())
 	}
 	anonData := apps["data"].(map[string]any)
-	if names := linkNames(anonData); len(names) != 1 || names[0] != "鍏紑鐪嬫澘" {
+	if names := linkNames(anonData); len(names) != 1 || names[0] != "公开看板" {
 		t.Fatalf("anonymous should only see public links, got %v", names)
 	}
 	if n := len(anonData["apps"].([]any)); n != 0 {
 		t.Fatalf("anonymous should not see oauth apps, got %d", n)
 	}
 
-	// 闈炵鐞嗗憳鐧诲綍鐢ㄦ埛锛氬叏閮ㄩ摼鎺?+ OAuth 搴旂敤
+	// 非管理员登录用户：全部链接 + OAuth 应用
 	w, _ = doJSON(t, h, "POST", "/api/admin/users",
 		`{"username":"bob","password":"bob1234567","groups":["view"]}`, adminHdr)
 	if w.Code != http.StatusOK {
@@ -562,7 +562,7 @@ func TestAppsVisibility(t *testing.T) {
 		t.Fatalf("logged-in user should see oauth apps, got %d", n)
 	}
 
-	// 闅愮閾炬帴鍒囨崲涓哄叕寮€ 鈫?鍖垮悕鍙
+	// 隐私链接切换为公开 → 匿名可见
 	w, _ = doJSON(t, h, "PUT", "/api/admin/links/"+privID, `{"public":true}`, adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("update link public: %d %s", w.Code, w.Body.String())
@@ -632,7 +632,7 @@ func TestSessionTimeout(t *testing.T) {
 	}
 }
 
-// TestUserCRUD 绠＄悊绔敤鎴蜂笌缁勭鐞嗐€?
+// TestUserCRUD 管理端用户与组管理。
 func TestUserCRUD(t *testing.T) {
 	s := newTestServer(t)
 	h := s.Handler()
@@ -646,13 +646,13 @@ func TestUserCRUD(t *testing.T) {
 	data := out["data"].(map[string]any)
 	uid := fmt.Sprintf("%v", data["id"])
 
-	// 鏇存柊缁勶紙淇濇寔闈炵鐞嗗憳锛?
+	// 更新组（保持非管理员）
 	w, _ = doJSON(t, h, "PUT", "/api/admin/users/"+uid, `{"groups":["view"]}`, adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("update user: %d %s", w.Code, w.Body.String())
 	}
 
-	// 闈炵鐞嗗憳鏃犳潈璁块棶
+	// 非管理员无权访问
 	w, _ = doJSON(t, h, "POST", "/api/auth/login", `{"username":"alice","password":"alice12345"}`, nil)
 	aliceCookie := map[string]string{"Cookie": strings.Split(w.Header().Get("Set-Cookie"), ";")[0]}
 	w, _ = doJSON(t, h, "GET", "/api/admin/users", "", aliceCookie)
@@ -660,7 +660,7 @@ func TestUserCRUD(t *testing.T) {
 		t.Fatalf("alice should be forbidden from admin api, got %d", w.Code)
 	}
 
-	// 鍒犻櫎
+	// 删除
 	w, _ = doJSON(t, h, "DELETE", "/api/admin/users/"+uid, "", adminHdr)
 	if w.Code != http.StatusOK {
 		t.Fatalf("delete user: %d %s", w.Code, w.Body.String())
