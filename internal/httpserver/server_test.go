@@ -494,6 +494,259 @@ func TestLinkCRUD(t *testing.T) {
 	}
 }
 
+// TestAppsVisibility 门户免登录浏览与链接可见性：
+// 匿名仅见公开链接（无 OAuth 应用入口）；登录后（含非管理员）可见隐私链接与全部入口。
+func TestAppsVisibility(t *testing.T) {
+	s := newTestServer(t)
+	h := s.Handler()
+	adminHdr := loginAdmin(t, h)
+
+	// OAuth 应用（带 portal_url，出现在门户卡片）
+	w, _ := doJSON(t, h, "POST", "/api/admin/clients",
+		`{"client_name":"media","redirect_uris":["https://media.test/cb"],"portal_url":"https://media.test"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create client: %d %s", w.Code, w.Body.String())
+	}
+
+	// 公开链接与隐私链接（缺省为隐私）各一
+	w, _ = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"公开看板","url":"https://pub.example.com","public":true}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create public link: %d %s", w.Code, w.Body.String())
+	}
+	w, out := doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"隐私后台","url":"https://priv.example.com"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create private link: %d %s", w.Code, w.Body.String())
+	}
+	privID := fmt.Sprintf("%v", out["data"].(map[string]any)["id"])
+
+	linkNames := func(m map[string]any) []string {
+		names := []string{}
+		for _, l := range m["links"].([]any) {
+			names = append(names, l.(map[string]any)["name"].(string))
+		}
+		return names
+	}
+
+	// 匿名：200，仅公开链接，无 apps
+	w, apps := doJSON(t, h, "GET", "/api/apps", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("anonymous apps should be 200, got %d %s", w.Code, w.Body.String())
+	}
+	anonData := apps["data"].(map[string]any)
+	if names := linkNames(anonData); len(names) != 1 || names[0] != "公开看板" {
+		t.Fatalf("anonymous should only see public links, got %v", names)
+	}
+	if n := len(anonData["apps"].([]any)); n != 0 {
+		t.Fatalf("anonymous should not see oauth apps, got %d", n)
+	}
+
+	// 非管理员登录用户：全部链接 + OAuth 应用
+	w, _ = doJSON(t, h, "POST", "/api/admin/users",
+		`{"username":"bob","password":"bob1234567","groups":["view"]}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create bob: %d %s", w.Code, w.Body.String())
+	}
+	w, _ = doJSON(t, h, "POST", "/api/auth/login", `{"username":"bob","password":"bob1234567"}`, nil)
+	bobHdr := map[string]string{"Cookie": strings.Split(w.Header().Get("Set-Cookie"), ";")[0]}
+	w, apps = doJSON(t, h, "GET", "/api/apps", "", bobHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("logged-in apps: %d %s", w.Code, w.Body.String())
+	}
+	bobData := apps["data"].(map[string]any)
+	if names := linkNames(bobData); len(names) != 2 {
+		t.Fatalf("logged-in user should see all links, got %v", names)
+	}
+	if n := len(bobData["apps"].([]any)); n != 1 {
+		t.Fatalf("logged-in user should see oauth apps, got %d", n)
+	}
+
+	// 隐私链接切换为公开 → 匿名可见
+	w, _ = doJSON(t, h, "PUT", "/api/admin/links/"+privID, `{"public":true}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("update link public: %d %s", w.Code, w.Body.String())
+	}
+	w, apps = doJSON(t, h, "GET", "/api/apps", "", nil)
+	anonData = apps["data"].(map[string]any)
+	if names := linkNames(anonData); len(names) != 2 {
+		t.Fatalf("anonymous should see both public links now, got %v", names)
+	}
+}
+
+// TestFavorites 门户关注：关注/取关链接与应用，/api/apps 返回 followed 状态；删除链接清理关注；非法目标 404。
+func TestFavorites(t *testing.T) {
+	s := newTestServer(t)
+	h := s.Handler()
+	adminHdr := loginAdmin(t, h)
+
+	// 准备：一个链接 + 一个 OAuth 应用
+	w, out := doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"看板","url":"https://grafana.example.com"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create link: %d %s", w.Code, w.Body.String())
+	}
+	linkID := fmt.Sprintf("%v", out["data"].(map[string]any)["id"])
+	w, out = doJSON(t, h, "POST", "/api/admin/clients",
+		`{"client_name":"media","redirect_uris":["https://media.test/cb"],"portal_url":"https://media.test"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create client: %d %s", w.Code, w.Body.String())
+	}
+	clientID := out["data"].(map[string]any)["client_id"].(string)
+
+	// 匿名 401
+	w, _ = doJSON(t, h, "GET", "/api/favorites", "", nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous favorites should 401, got %d", w.Code)
+	}
+
+	// 关注链接与应用（幂等：重复关注不新增）
+	for i := 0; i < 2; i++ {
+		w, _ = doJSON(t, h, "PUT", "/api/favorites/link/"+linkID, "", adminHdr)
+		if w.Code != http.StatusOK {
+			t.Fatalf("follow link: %d %s", w.Code, w.Body.String())
+		}
+	}
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/app/"+clientID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("follow app: %d %s", w.Code, w.Body.String())
+	}
+
+	// 关注列表
+	w, favs := doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list favorites: %d", w.Code)
+	}
+	if n := len(favs["data"].([]any)); n != 2 {
+		t.Fatalf("favorites should have 2 entries, got %v", favs["data"])
+	}
+
+	// /api/apps 带 followed 状态
+	w, apps := doJSON(t, h, "GET", "/api/apps", "", adminHdr)
+	appsData := apps["data"].(map[string]any)
+	l0 := appsData["links"].([]any)[0].(map[string]any)
+	a0 := appsData["apps"].([]any)[0].(map[string]any)
+	if l0["followed"] != true || a0["followed"] != true {
+		t.Fatalf("followed flags unexpected: link=%v app=%v", l0["followed"], a0["followed"])
+	}
+	if l0["id"] == nil {
+		t.Fatalf("link id missing in /api/apps: %v", l0)
+	}
+
+	// 非法目标：未知 kind / 不存在的链接
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/room/123", "", adminHdr)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unknown kind should 404, got %d", w.Code)
+	}
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/link/99999", "", adminHdr)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("unknown link should 404, got %d", w.Code)
+	}
+
+	// 门户不可见的目标不可关注：停用的链接、未配置入口地址的应用
+	w, out = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"停用看板","url":"https://off.example.com","active":false}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create inactive link: %d %s", w.Code, w.Body.String())
+	}
+	offID := fmt.Sprintf("%v", out["data"].(map[string]any)["id"])
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/link/"+offID, "", adminHdr)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("inactive link should 404, got %d", w.Code)
+	}
+	w, out = doJSON(t, h, "POST", "/api/admin/clients",
+		`{"client_name":"noportal","redirect_uris":["https://np.test/cb"]}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create client without portal_url: %d %s", w.Code, w.Body.String())
+	}
+	noPortalID := out["data"].(map[string]any)["client_id"].(string)
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/app/"+noPortalID, "", adminHdr)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("app without portal_url should 404, got %d", w.Code)
+	}
+
+	// 惰性过滤：关注后目标失效（停用）时，关注列表不再计入；恢复后重新可见
+	w, out = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"临时看板","url":"https://tmp.example.com"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create temp link: %d %s", w.Code, w.Body.String())
+	}
+	tmpID := fmt.Sprintf("%v", out["data"].(map[string]any)["id"])
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/link/"+tmpID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("follow temp link: %d", w.Code)
+	}
+	w, _ = doJSON(t, h, "PUT", "/api/admin/links/"+tmpID, `{"active":false}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("disable temp link: %d", w.Code)
+	}
+	w, favs = doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	if n := len(favs["data"].([]any)); n != 2 {
+		t.Fatalf("disabled link should be lazily filtered from favorites, got %v", favs["data"])
+	}
+	w, _ = doJSON(t, h, "PUT", "/api/admin/links/"+tmpID, `{"active":true}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("re-enable temp link: %d", w.Code)
+	}
+	w, favs = doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	if n := len(favs["data"].([]any)); n != 3 {
+		t.Fatalf("re-enabled link should be visible in favorites again, got %v", favs["data"])
+	}
+
+	// 停用已关注的客户端 → 应用关注同样被惰性过滤（无需删表清理）
+	w, list := doJSON(t, h, "GET", "/api/admin/clients", "", adminHdr)
+	var cdbID any
+	for _, c := range list["data"].([]any) {
+		if m := c.(map[string]any); m["client_id"] == clientID {
+			cdbID = m["id"]
+		}
+	}
+	if cdbID == nil {
+		t.Fatalf("client %s not found in admin list", clientID)
+	}
+	w, _ = doJSON(t, h, "PUT", fmt.Sprintf("/api/admin/clients/%v", cdbID), `{"active":false}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("disable client: %d %s", w.Code, w.Body.String())
+	}
+	w, favs = doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	for _, f := range favs["data"].([]any) {
+		if f.(map[string]any)["kind"] == "app" {
+			t.Fatalf("favorite of disabled client should be lazily filtered, got %v", favs["data"])
+		}
+	}
+	w, _ = doJSON(t, h, "PUT", fmt.Sprintf("/api/admin/clients/%v", cdbID), `{"active":true}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("re-enable client: %d", w.Code)
+	}
+
+	// 清理临时链接的关注，保持后续断言简单
+	w, _ = doJSON(t, h, "DELETE", "/api/favorites/link/"+tmpID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unfollow temp link: %d", w.Code)
+	}
+
+	// 取关应用 → followed 变 false
+	w, _ = doJSON(t, h, "DELETE", "/api/favorites/app/"+clientID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unfollow app: %d %s", w.Code, w.Body.String())
+	}
+	w, apps = doJSON(t, h, "GET", "/api/apps", "", adminHdr)
+	a0 = apps["data"].(map[string]any)["apps"].([]any)[0].(map[string]any)
+	if a0["followed"] != false {
+		t.Fatalf("app followed should be false after unfollow, got %v", a0["followed"])
+	}
+
+	// 删除链接 → 关注记录被清理
+	w, _ = doJSON(t, h, "DELETE", "/api/admin/links/"+linkID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete link: %d %s", w.Code, w.Body.String())
+	}
+	w, favs = doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	if n := len(favs["data"].([]any)); n != 0 {
+		t.Fatalf("favorites should be cleaned after link deletion, got %v", favs["data"])
+	}
+}
+
 // TestSessionTimeout 管理员可配置登录会话超时时长：默认 24 小时；调整后新会话与 cookie 同步生效。
 func TestSessionTimeout(t *testing.T) {
 	s := newTestServer(t)

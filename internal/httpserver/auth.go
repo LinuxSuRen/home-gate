@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -305,47 +307,128 @@ func (s *Server) feishuExchangeLogin(r *http.Request, appID, appSecret, code str
 }
 
 // handleApps 已接入系统入口卡片：OAuth 应用（DCR 注册的 portal_url）+ 纯链接入口。
-func (s *Server) handleApps(w http.ResponseWriter, r *http.Request, u *model.User) {
-	clients, err := s.db.ListClients()
-	if err != nil {
-		apiError(w, http.StatusInternalServerError, "server_error", "加载失败")
-		return
-	}
-	type app struct {
-		ClientID    string `json:"client_id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		LogoURL     string `json:"logo_url"`
-		PortalURL   string `json:"portal_url"` // 仅作跳转目标，不在卡片上展示
-	}
-	apps := []app{}
-	for _, c := range clients {
-		if c.Active && c.PortalURL != "" {
-			apps = append(apps, app{
-				ClientID: c.ClientID, Name: c.Name,
-				Description: c.Description, LogoURL: c.LogoURL,
-				PortalURL: c.PortalURL,
-			})
+// 免登录可访问：未登录仅返回公开链接；登录后返回全部入口（隐私链接 + OAuth 应用）。
+// 登录用户的关注状态随入口一并返回（followed）。
+func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
+	u := s.currentUser(r)
+	favLinks, favApps := s.favoritesOf(u)
+	apps := []portalApp{}
+	if u != nil {
+		clients, err := s.db.ListClients()
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, "server_error", "加载失败")
+			return
+		}
+		for _, c := range clients {
+			if c.Active && c.PortalURL != "" {
+				apps = append(apps, portalApp{
+					ClientID: c.ClientID, Name: c.Name,
+					Description: c.Description, LogoURL: c.LogoURL,
+					PortalURL: c.PortalURL, // 仅作跳转目标，不在卡片上展示
+					Followed:  favApps[c.ClientID],
+				})
+			}
 		}
 	}
+
+	query := s.db.Where("active = ?", true)
+	if u == nil {
+		query = query.Where("public = ?", true)
+	}
 	var linkRows []model.AppLink
-	if err := s.db.Where("active = ?", true).Order("sort").Order("id").Find(&linkRows).Error; err != nil {
+	if err := query.Order("sort").Order("id").Find(&linkRows).Error; err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "加载失败")
 		return
 	}
-	type link struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		LogoURL     string `json:"logo_url"`
-		URL         string `json:"url"` // 跳转目标
-	}
-	links := []link{}
+	links := []portalLink{}
 	for _, l := range linkRows {
-		links = append(links, link{
-			Name: l.Name, Description: l.Description, LogoURL: l.LogoURL, URL: l.URL,
+		links = append(links, portalLink{
+			ID: l.ID, Name: l.Name, Description: l.Description, LogoURL: l.LogoURL, URL: l.URL,
+			Followed: favLinks[fmt.Sprintf("%d", l.ID)],
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
 		"apps": apps, "links": links,
 	}})
+}
+
+// favoritesOf 读取用户关注集合；未登录返回空集。
+// 惰性过滤已失效的关注（链接/客户端被删除或停用后不再计入），孤儿记录无需提前清理；
+// DB 错误记日志并按空集处理，避免静默吞错。
+func (s *Server) favoritesOf(u *model.User) (links, apps map[string]bool) {
+	links, apps = map[string]bool{}, map[string]bool{}
+	if u == nil {
+		return
+	}
+	var favs []model.Favorite
+	if err := s.db.Where("user_id = ?", u.ID).Find(&favs).Error; err != nil {
+		log.Printf("favorites: 加载用户 %d 的关注失败: %v", u.ID, err)
+		return
+	}
+	// 过滤仍然可见的链接关注（启用中才出现在门户）
+	var linkIDs []uint
+	for _, f := range favs {
+		if f.Kind != "link" {
+			continue
+		}
+		if id, err := strconv.ParseUint(f.Ref, 10, 64); err == nil {
+			linkIDs = append(linkIDs, uint(id))
+		}
+	}
+	visibleLinks := map[string]bool{}
+	if len(linkIDs) > 0 {
+		var rows []model.AppLink
+		if err := s.db.Where("id IN ? AND active = ?", linkIDs, true).Find(&rows).Error; err != nil {
+			log.Printf("favorites: 校验链接关注失败: %v", err)
+		} else {
+			for _, l := range rows {
+				visibleLinks[strconv.FormatUint(uint64(l.ID), 10)] = true
+			}
+		}
+	}
+	// 过滤仍然可见的应用关注（启用且配置了入口地址才出现在门户）
+	var clientIDs []string
+	for _, f := range favs {
+		if f.Kind == "app" {
+			clientIDs = append(clientIDs, f.Ref)
+		}
+	}
+	visibleApps := map[string]bool{}
+	if len(clientIDs) > 0 {
+		var rows []model.Client
+		if err := s.db.Where("client_id IN ? AND active = ? AND portal_url <> ''", clientIDs, true).
+			Find(&rows).Error; err != nil {
+			log.Printf("favorites: 校验应用关注失败: %v", err)
+		} else {
+			for _, c := range rows {
+				visibleApps[c.ClientID] = true
+			}
+		}
+	}
+	for _, f := range favs {
+		if f.Kind == "link" && visibleLinks[f.Ref] {
+			links[f.Ref] = true
+		} else if f.Kind == "app" && visibleApps[f.Ref] {
+			apps[f.Ref] = true
+		}
+	}
+	return
+}
+
+type portalApp struct {
+	ClientID    string `json:"client_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	LogoURL     string `json:"logo_url"`
+	PortalURL   string `json:"portal_url"` // 仅作跳转目标，不在卡片上展示
+	Followed    bool   `json:"followed"`
+}
+
+type portalLink struct {
+	ID          uint   `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	LogoURL     string `json:"logo_url"`
+	URL         string `json:"url"` // 跳转目标
+	Followed    bool   `json:"followed"`
 }

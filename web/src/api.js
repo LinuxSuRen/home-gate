@@ -62,6 +62,13 @@ export const getFeishuEnabled = () =>
 // ---- 应用入口 ----
 export const getApps = () => request('/api/apps')
 
+// ---- 门户关注 ----
+export const getFavorites = () => request('/api/favorites')
+export const followEntry = (kind, ref) =>
+  request(`/api/favorites/${kind}/${ref}`, { method: 'PUT' })
+export const unfollowEntry = (kind, ref) =>
+  request(`/api/favorites/${kind}/${ref}`, { method: 'DELETE' })
+
 // ---- 管理端：用户 ----
 export const getUsers = () => request('/api/admin/users')
 export const createUser = (user) =>

@@ -1,7 +1,9 @@
 package httpserver
 
 import (
+	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/linuxsuren/home-gate/internal/model"
 )
@@ -27,6 +29,7 @@ func (s *Server) handleAdminCreateLink(w http.ResponseWriter, r *http.Request, a
 		LogoURL     string `json:"logo_url"`
 		URL         string `json:"url"`
 		Sort        int    `json:"sort"`
+		Public      bool   `json:"public"`
 		Active      *bool  `json:"active"`
 	}
 	if err := readJSONBody(r, &req); err != nil {
@@ -43,7 +46,7 @@ func (s *Server) handleAdminCreateLink(w http.ResponseWriter, r *http.Request, a
 	}
 	link := &model.AppLink{
 		Name: req.Name, Description: req.Description, LogoURL: req.LogoURL,
-		URL: req.URL, Sort: req.Sort, Active: active,
+		URL: req.URL, Sort: req.Sort, Public: req.Public, Active: active,
 	}
 	if err := s.db.Create(link).Error; err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "创建链接失败")
@@ -70,6 +73,7 @@ func (s *Server) handleAdminUpdateLink(w http.ResponseWriter, r *http.Request, a
 		LogoURL     *string `json:"logo_url"`
 		URL         *string `json:"url"`
 		Sort        *int    `json:"sort"`
+		Public      *bool   `json:"public"`
 		Active      *bool   `json:"active"`
 	}
 	if err := readJSONBody(r, &req); err != nil {
@@ -100,6 +104,9 @@ func (s *Server) handleAdminUpdateLink(w http.ResponseWriter, r *http.Request, a
 	if req.Sort != nil {
 		updates["sort"] = *req.Sort
 	}
+	if req.Public != nil {
+		updates["public"] = *req.Public
+	}
 	if req.Active != nil {
 		updates["active"] = *req.Active
 	}
@@ -127,6 +134,11 @@ func (s *Server) handleAdminDeleteLink(w http.ResponseWriter, r *http.Request, a
 	if err := s.db.Delete(&link).Error; err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "删除链接失败")
 		return
+	}
+	// 清理该链接的关注记录；失败仅记日志（读取侧有惰性过滤兜底，不阻塞删除）
+	if err := s.db.Where("kind = ? AND ref = ?", "link", strconv.FormatUint(uint64(link.ID), 10)).
+		Delete(&model.Favorite{}).Error; err != nil {
+		log.Printf("favorites: 清理链接 %d 的关注记录失败: %v", link.ID, err)
 	}
 	s.db.Audit(admin.Username, "link_delete", "name="+link.Name, clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"data": "ok"})

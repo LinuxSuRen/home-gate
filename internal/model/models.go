@@ -82,9 +82,19 @@ type AppLink struct {
 	LogoURL     string    `gorm:"size:512" json:"logo_url"`
 	URL         string    `gorm:"size:512" json:"url"` // 跳转地址
 	Sort        int       `json:"sort"`                // 越小越靠前
+	Public      bool      `gorm:"default:false" json:"public"` // 公开链接免登录可见；隐私链接需登录
 	Active      bool      `json:"active"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Favorite 用户关注的门户入口：kind 为 link（ref=链接 id）或 app（ref=client_id）
+type Favorite struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	UserID    uint      `gorm:"index;uniqueIndex:uk_fav" json:"-"`
+	Kind      string    `gorm:"size:16;uniqueIndex:uk_fav" json:"kind"`
+	Ref       string    `gorm:"size:64;uniqueIndex:uk_fav" json:"ref"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // InitialToken DCR 初始访问令牌（管理员签发/吊销）

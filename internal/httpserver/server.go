@@ -57,7 +57,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/auth/feishu/enabled", s.handleFeishuEnabled)
 	s.mux.HandleFunc("GET /api/auth/feishu/start", s.handleFeishuStart)
 	s.mux.HandleFunc("GET /api/auth/feishu/callback", s.handleFeishuCallback)
-	s.mux.HandleFunc("GET /api/apps", s.requireSession(s.handleApps))
+	s.mux.HandleFunc("GET /api/apps", s.handleApps)
+
+	// 门户关注（登录用户）
+	s.mux.HandleFunc("GET /api/favorites", s.requireSession(s.handleListFavorites))
+	s.mux.HandleFunc("PUT /api/favorites/{kind}/{ref}", s.requireSession(s.handleFollow))
+	s.mux.HandleFunc("DELETE /api/favorites/{kind}/{ref}", s.requireSession(s.handleUnfollow))
 
 	// 管理端 API（admin 组）
 	s.mux.HandleFunc("GET /api/admin/users", s.requireAdmin(s.handleAdminListUsers))
