@@ -13,6 +13,7 @@
 - **协议**：OAuth 2.0 授权码 + PKCE、refresh token（轮换）、OIDC 发现、JWKS（Ed25519）、RP-initiated logout、受保护 DCR
 - **身份源**：本地账号（初始 admin 兜底运维）+ 飞书上游联邦登录（可选）
 - **角色**：门户统一用户组（admin / operate / view 及自定义），经 `groups` 声明下发，各应用按映射换算本地角色
+- **子域名访问**：为接入的服务分配子域名（如 `license.tech.abc.com`），由 home-gate 纯 Go 反向代理，无需 nginx 等中间件
 
 ## 快速开始
 
@@ -70,6 +71,16 @@ curl -X POST https://gate.example.com/oauth2/register \
 
 - 用户组在门户统一维护（admin / operate / view 及自定义组）。
 - 登录时随 `groups` 声明下发给应用，应用按注册时配置的 `groups_map` 换算本地角色。
+
+## 给服务配置子域名（子站）
+
+门户域名（如 `tech.abc.com`）下的接入服务可以拥有自己的子域名（如 `license.tech.abc.com`），由 home-gate 自身完成反向代理（标准库实现，支持 WebSocket 与流式响应），**无需部署 nginx 等额外中间件**：
+
+1. 管理后台「系统设置 → 门户域名」填写主域名（如 `tech.abc.com`，留空则按 `-issuer` 推断）；
+2. 在「客户端」或「链接」中为服务填写子域名标签（如 `license`，全局唯一，仅小写字母/数字/中划线）；
+3. DNS 侧将 `*.tech.abc.com` 泛解析指向 home-gate，即可通过 `http://license.tech.abc.com` 访问该服务。
+
+说明：子站流量代理到该服务的入口地址（客户端为 `portal_url`，链接为 `url`），代理层附加上游 Host 改写与标准 `X-Forwarded-*` 头；子站认证仍由子系统自身的 OIDC/SSO 流程接管；子域名标签仅管理员可配置。
 
 ## 端点一览
 

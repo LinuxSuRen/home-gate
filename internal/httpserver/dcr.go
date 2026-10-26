@@ -22,6 +22,7 @@ type dcrMetadata struct {
 	PortalURL               string   `json:"portal_url"`   // 扩展：门户入口页跳转地址
 	Description             string   `json:"description"`  // 扩展：应用描述（门户卡片展示）
 	LogoURL                 string   `json:"logo_url"`     // 扩展：应用 logo 地址
+	Subdomain               string   `json:"subdomain"`    // 扩展：子站标签（仅管理员接口生效，DCR 自助注册不开放，防抢注）
 	GroupsMap               map[string]string `json:"groups_map"` // 扩展：gate 组名 -> 子系统角色
 }
 
@@ -75,6 +76,7 @@ func (s *Server) handleDCRCreate(w http.ResponseWriter, r *http.Request) {
 	regToken := store.RandomToken(32)
 	uris, _ := json.Marshal(meta.RedirectURIs)
 	gm, _ := json.Marshal(meta.GroupsMap)
+	// 注意：subdomain 不在此持久化——子站标签仅管理员可配（防止经 DCR 抢注他人子站）
 	client := &model.Client{
 		ClientID: clientID, ClientSecretHash: secretHash,
 		Name: meta.ClientName, RedirectURIs: string(uris),

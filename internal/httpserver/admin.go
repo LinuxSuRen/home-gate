@@ -239,6 +239,7 @@ func (s *Server) handleAdminListClients(w http.ResponseWriter, r *http.Request, 
 			"token_endpoint_auth_method": c.TokenEndpointAuthMethod,
 			"portal_url": c.PortalURL, "active": c.Active,
 			"description": c.Description, "logo_url": c.LogoURL,
+			"subdomain": c.Subdomain,
 			"issued_at": c.IssuedAt,
 		})
 	}
@@ -262,6 +263,15 @@ func (s *Server) handleAdminCreateClient(w http.ResponseWriter, r *http.Request,
 		apiError(w, http.StatusBadRequest, "invalid_client_metadata", err.Error())
 		return
 	}
+	subdomain, err := s.normalizeSubdomain(meta.Subdomain)
+	if err != nil {
+		apiError(w, http.StatusBadRequest, "invalid_subdomain", err.Error())
+		return
+	}
+	if s.subdomainTaken(subdomain, 0, 0) {
+		apiError(w, http.StatusBadRequest, "subdomain_taken", "子域名 "+subdomain+" 已被其他服务占用")
+		return
+	}
 
 	clientID := "gate-" + store.RandomToken(12)
 	secret := ""
@@ -279,6 +289,7 @@ func (s *Server) handleAdminCreateClient(w http.ResponseWriter, r *http.Request,
 		Scopes: store.TrimScope(meta.Scope),
 		TokenEndpointAuthMethod: meta.TokenEndpointAuthMethod,
 		PortalURL: meta.PortalURL, Description: meta.Description, LogoURL: meta.LogoURL,
+		Subdomain: subdomain,
 		GroupsMap: string(gm),
 		RegTokenHash: store.HashSecret(regToken),
 		Active: true, IssuedAt: time.Now(),
@@ -287,7 +298,7 @@ func (s *Server) handleAdminCreateClient(w http.ResponseWriter, r *http.Request,
 		apiError(w, http.StatusInternalServerError, "server_error", "创建客户端失败")
 		return
 	}
-	s.db.Audit(admin.Username, "client_create", "client="+clientID+" name="+meta.ClientName, clientIP(r))
+	s.db.Audit(admin.Username, "client_create", "client="+clientID+" name="+meta.ClientName+" subdomain="+subdomain, clientIP(r))
 	resp := map[string]any{
 		"client_id": clientID, "client_secret": secret,
 		"registration_access_token": regToken, // RFC 7592 管理凭据（可选使用）
@@ -312,6 +323,7 @@ func (s *Server) handleAdminUpdateClient(w http.ResponseWriter, r *http.Request,
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
 		LogoURL     *string `json:"logo_url"`
+		Subdomain   *string `json:"subdomain"`
 	}
 	if err := readJSONBody(r, &req); err != nil {
 		apiError(w, http.StatusBadRequest, "invalid_request", "请求体不是合法 JSON")
@@ -332,6 +344,18 @@ func (s *Server) handleAdminUpdateClient(w http.ResponseWriter, r *http.Request,
 	}
 	if req.LogoURL != nil {
 		updates["logo_url"] = *req.LogoURL
+	}
+	if req.Subdomain != nil {
+		subdomain, err := s.normalizeSubdomain(*req.Subdomain)
+		if err != nil {
+			apiError(w, http.StatusBadRequest, "invalid_subdomain", err.Error())
+			return
+		}
+		if s.subdomainTaken(subdomain, c.ID, 0) {
+			apiError(w, http.StatusBadRequest, "subdomain_taken", "子域名 "+subdomain+" 已被其他服务占用")
+			return
+		}
+		updates["subdomain"] = subdomain
 	}
 	if len(updates) > 0 {
 		if err := s.db.Model(&c).Updates(updates).Error; err != nil {
@@ -468,6 +492,8 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request, 
 		"feishu_app_id": appID, "feishu_enabled": appID != "",
 		// 登录会话有效时长（小时）：默认 24（当天有效），管理员可调
 		"session_ttl_hours": s.db.GetSettingInt("session_ttl_hours", 24),
+		// 门户主域名（设置值或按 -issuer 推断），子站路由依赖它
+		"portal_domain": s.portalDomain(),
 		// 飞书登录回调地址：需加入飞书开放平台应用的重定向 URL 白名单
 		"feishu_callback": base + "/api/auth/feishu/callback",
 		"oidc_endpoints": map[string]string{
@@ -487,6 +513,7 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request, adm
 		FeishuAppID      string `json:"feishu_app_id"`
 		FeishuAppSecret  string `json:"feishu_app_secret"`
 		SessionTTLHours  *int   `json:"session_ttl_hours"`
+		PortalDomain     *string `json:"portal_domain"`
 	}
 	if err := readJSONBody(r, &req); err != nil {
 		apiError(w, http.StatusBadRequest, "invalid_request", "请求体不是合法 JSON")
@@ -503,6 +530,18 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request, adm
 			return
 		}
 		detail += fmt.Sprintf("会话时长=%dh ", *req.SessionTTLHours)
+	}
+	if req.PortalDomain != nil {
+		domain := canonicalHost(*req.PortalDomain)
+		if domain != "" && !portalDomainRe.MatchString(domain) {
+			apiError(w, http.StatusBadRequest, "invalid_request", "门户域名须为合法域名（如 tech.abc.com，不含协议与端口）")
+			return
+		}
+		if err := s.db.SetSetting("portal_domain", domain); err != nil {
+			apiError(w, http.StatusInternalServerError, "server_error", "保存设置失败")
+			return
+		}
+		detail += "门户域名=" + domain + " "
 	}
 	if req.FeishuAppID != "" {
 		if err := s.db.SetSetting("feishu_app_id", req.FeishuAppID); err != nil {

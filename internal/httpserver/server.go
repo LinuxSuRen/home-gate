@@ -90,6 +90,9 @@ func (s *Server) routes() {
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		go s.db.CleanupExpired() // 惰性清理过期数据；失败不影响请求
+		if s.maybeSubsite(w, r) { // 子站（子域名）命中时反向代理到对应服务
+			return
+		}
 		s.mux.ServeHTTP(w, r)
 	})
 }
