@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="home-gate logo">
+  <defs>
+    <linearGradient id="hg-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4E9DFF"/>
+      <stop offset="1" stop-color="#2F6BE6"/>
+    </linearGradient>
+  </defs>
+  <!-- rounded badge -->
+  <rect width="128" height="128" rx="30" fill="url(#hg-bg)"/>
+  <!-- gate arch -->
+  <path d="M38 88 V58 C38 42 50 34 64 34 C78 34 90 42 90 58 V88" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"/>
+  <!-- threshold -->
+  <path d="M32 96 H96" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+  <!-- keyhole -->
+  <circle cx="64" cy="62" r="6.5" fill="#fff"/>
+  <path d="M60.8 66 L58 76 H70 L67.2 66 Z" fill="#fff"/>
+</svg>

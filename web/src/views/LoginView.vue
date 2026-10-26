@@ -42,6 +42,9 @@ async function submit() {
 <template>
   <div class="login-wrap">
     <el-card class="login-card">
+      <div class="login-logo-wrap">
+        <img src="/logo.svg" alt="Home Gate logo" class="login-logo" />
+      </div>
       <h2 class="login-title">Home Gate</h2>
       <p class="dim" style="margin-top: -8px">统一登录，一次登录访问所有系统</p>
       <el-form @submit.prevent="submit">
@@ -78,5 +81,12 @@ async function submit() {
 }
 .login-title {
   text-align: center;
+}
+.login-logo-wrap {
+  text-align: center;
+}
+.login-logo {
+  width: 56px;
+  height: 56px;
 }
 </style>
