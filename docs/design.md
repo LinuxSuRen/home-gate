@@ -56,6 +56,7 @@
 - **SigningKey**：kid, ed25519 私钥（创建即持久化，多 key 共存实现轮换）
 - **AuthCode**：code, client_id, user_id, redirect_uri, scope, nonce, code_challenge, method, expires_at（一次性）
 - **AuditLog**：time, actor, action(login/logout/authorize/token/dcr/…), detail, ip
+- **AppLink**：name, description, logo_url, url, sort, public, active（纯链接入口；public 控制免登录是否可见，缺省隐私）
 
 ## 5. 令牌
 
@@ -67,7 +68,7 @@
 
 - `POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/auth/me`、`POST /api/auth/change-password`
 - `GET /api/auth/feishu/start`、`GET /api/auth/feishu/callback`（state 防 CSRF，自动 provision：按 union_id 命中或建新账号）
-- `GET /api/apps`：已接入系统卡片（来自 Client.portal_url）
+- `GET /api/apps`：应用入口卡片。**免登录可访问**：未登录仅返回公开（`public`）链接；登录后返回全部链接与 OAuth 应用卡片（来自 Client.portal_url）
 - 管理端（admin 组）：`/api/admin/users`、`/api/admin/groups`、`/api/admin/clients`（吊销/重置 secret）、`/api/admin/initial-tokens`、`/api/admin/audit`、`/api/admin/settings`（飞书 app 凭据）
 
 ## 7. 应用接入改造

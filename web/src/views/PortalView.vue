@@ -2,6 +2,9 @@
 import { ref, onMounted } from 'vue'
 import { getApps } from '../api'
 
+defineProps({ anonymous: Boolean })
+const emit = defineEmits(['login'])
+
 const cards = ref([])
 const loading = ref(true)
 
@@ -43,8 +46,22 @@ function onLogoError(e) {
 <template>
   <div class="page">
     <h2 style="margin-top: 0">应用中心</h2>
+    <el-alert
+      v-if="anonymous"
+      type="info"
+      :closable="false"
+      class="guest-banner"
+    >
+      <template #title>
+        游客模式：仅展示公开应用，登录后可查看隐私链接等更多内容
+        <el-button type="primary" size="small" class="guest-banner__btn" @click="emit('login')">立即登录</el-button>
+      </template>
+    </el-alert>
     <p v-if="loading" class="dim">正在加载…</p>
-    <el-empty v-else-if="cards.length === 0" description="暂无已接入系统，可在管理后台通过 DCR 注册客户端并配置入口地址" />
+    <el-empty
+      v-else-if="cards.length === 0"
+      :description="anonymous ? '暂无公开应用，登录后可查看更多' : '暂无已接入系统，可在管理后台通过 DCR 注册客户端并配置入口地址'"
+    />
     <div v-else class="apps-grid">
       <a v-for="card in cards" :key="card.key" :href="card.url" class="app-card" target="_blank">
         <div class="app-card__logo">
@@ -63,6 +80,12 @@ function onLogoError(e) {
 </template>
 
 <style scoped>
+.guest-banner {
+  margin-bottom: 16px;
+}
+.guest-banner__btn {
+  margin-left: 12px;
+}
 .apps-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

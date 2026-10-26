@@ -82,6 +82,7 @@ type AppLink struct {
 	LogoURL     string    `gorm:"size:512" json:"logo_url"`
 	URL         string    `gorm:"size:512" json:"url"` // 跳转地址
 	Sort        int       `json:"sort"`                // 越小越靠前
+	Public      bool      `gorm:"default:false" json:"public"` // 公开链接免登录可见；隐私链接需登录
 	Active      bool      `json:"active"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`

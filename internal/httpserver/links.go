@@ -27,6 +27,7 @@ func (s *Server) handleAdminCreateLink(w http.ResponseWriter, r *http.Request, a
 		LogoURL     string `json:"logo_url"`
 		URL         string `json:"url"`
 		Sort        int    `json:"sort"`
+		Public      bool   `json:"public"`
 		Active      *bool  `json:"active"`
 	}
 	if err := readJSONBody(r, &req); err != nil {
@@ -43,7 +44,7 @@ func (s *Server) handleAdminCreateLink(w http.ResponseWriter, r *http.Request, a
 	}
 	link := &model.AppLink{
 		Name: req.Name, Description: req.Description, LogoURL: req.LogoURL,
-		URL: req.URL, Sort: req.Sort, Active: active,
+		URL: req.URL, Sort: req.Sort, Public: req.Public, Active: active,
 	}
 	if err := s.db.Create(link).Error; err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "创建链接失败")
@@ -70,6 +71,7 @@ func (s *Server) handleAdminUpdateLink(w http.ResponseWriter, r *http.Request, a
 		LogoURL     *string `json:"logo_url"`
 		URL         *string `json:"url"`
 		Sort        *int    `json:"sort"`
+		Public      *bool   `json:"public"`
 		Active      *bool   `json:"active"`
 	}
 	if err := readJSONBody(r, &req); err != nil {
@@ -99,6 +101,9 @@ func (s *Server) handleAdminUpdateLink(w http.ResponseWriter, r *http.Request, a
 	}
 	if req.Sort != nil {
 		updates["sort"] = *req.Sort
+	}
+	if req.Public != nil {
+		updates["public"] = *req.Public
 	}
 	if req.Active != nil {
 		updates["active"] = *req.Active

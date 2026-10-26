@@ -7,7 +7,7 @@ const links = ref([])
 const loading = ref(true)
 const showDlg = ref(false)
 const editing = ref(null)
-const form = ref({ name: '', url: '', description: '', logo_url: '', sort: 0, active: true })
+const form = ref({ name: '', url: '', description: '', logo_url: '', sort: 0, public: false, active: true })
 
 async function loadAll() {
   loading.value = true
@@ -23,7 +23,7 @@ onMounted(loadAll)
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', url: '', description: '', logo_url: '', sort: 0, active: true }
+  form.value = { name: '', url: '', description: '', logo_url: '', sort: 0, public: false, active: true }
   showDlg.value = true
 }
 
@@ -31,7 +31,7 @@ function openEdit(l) {
   editing.value = l
   form.value = {
     name: l.name || '', url: l.url || '', description: l.description || '',
-    logo_url: l.logo_url || '', sort: l.sort || 0, active: l.active !== false,
+    logo_url: l.logo_url || '', sort: l.sort || 0, public: !!l.public, active: l.active !== false,
   }
   showDlg.value = true
 }
@@ -82,6 +82,11 @@ async function handleRemove(l) {
       <el-table-column prop="url" label="地址" min-width="220" show-overflow-tooltip />
       <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
       <el-table-column prop="sort" label="排序" width="80" />
+      <el-table-column label="可见性" width="90">
+        <template #default="{ row }">
+          <el-tag :type="row.public ? 'success' : 'info'" size="small">{{ row.public ? '公开' : '隐私' }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
           <el-tag :type="row.active ? 'success' : 'danger'" size="small">{{ row.active ? '启用' : '停用' }}</el-tag>
@@ -102,6 +107,10 @@ async function handleRemove(l) {
         <el-form-item label="描述"><el-input v-model="form.description" /></el-form-item>
         <el-form-item label="Logo"><el-input v-model="form.logo_url" placeholder="图片地址，留空显示首字母" /></el-form-item>
         <el-form-item label="排序"><el-input-number v-model="form.sort" :min="0" /></el-form-item>
+        <el-form-item label="公开">
+          <el-switch v-model="form.public" />
+          <span class="dim" style="margin-left: 8px">公开链接免登录可见，隐私链接需登录后可见</span>
+        </el-form-item>
         <el-form-item label="状态"><el-switch v-model="form.active" /></el-form-item>
       </el-form>
       <template #footer>
