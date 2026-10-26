@@ -26,6 +26,7 @@ func (s *Server) handleAdminCreateLink(w http.ResponseWriter, r *http.Request, a
 		Description string `json:"description"`
 		LogoURL     string `json:"logo_url"`
 		URL         string `json:"url"`
+		Subdomain   string `json:"subdomain"`
 		Sort        int    `json:"sort"`
 		Active      *bool  `json:"active"`
 	}
@@ -37,19 +38,31 @@ func (s *Server) handleAdminCreateLink(w http.ResponseWriter, r *http.Request, a
 		apiError(w, http.StatusBadRequest, "invalid_request", "名称与地址必填")
 		return
 	}
+	// 查重与写入串行化，防止并发创建撞名（跨客户端/链接两表全局唯一）
+	s.subdomainMu.Lock()
+	defer s.subdomainMu.Unlock()
+	subdomain, err := s.normalizeSubdomain(req.Subdomain)
+	if err != nil {
+		apiError(w, http.StatusBadRequest, "invalid_subdomain", err.Error())
+		return
+	}
+	if s.subdomainTaken(subdomain, 0, 0) {
+		apiError(w, http.StatusBadRequest, "subdomain_taken", "子域名 "+subdomain+" 已被其他服务占用")
+		return
+	}
 	active := true
 	if req.Active != nil {
 		active = *req.Active
 	}
 	link := &model.AppLink{
 		Name: req.Name, Description: req.Description, LogoURL: req.LogoURL,
-		URL: req.URL, Sort: req.Sort, Active: active,
+		URL: req.URL, Subdomain: subdomain, Sort: req.Sort, Active: active,
 	}
 	if err := s.db.Create(link).Error; err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "创建链接失败")
 		return
 	}
-	s.db.Audit(admin.Username, "link_create", "name="+req.Name, clientIP(r))
+	s.db.Audit(admin.Username, "link_create", "name="+req.Name+" subdomain="+subdomain, clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"data": link})
 }
 
@@ -69,6 +82,7 @@ func (s *Server) handleAdminUpdateLink(w http.ResponseWriter, r *http.Request, a
 		Description *string `json:"description"`
 		LogoURL     *string `json:"logo_url"`
 		URL         *string `json:"url"`
+		Subdomain   *string `json:"subdomain"`
 		Sort        *int    `json:"sort"`
 		Active      *bool   `json:"active"`
 	}
@@ -91,6 +105,16 @@ func (s *Server) handleAdminUpdateLink(w http.ResponseWriter, r *http.Request, a
 		}
 		updates["url"] = *req.URL
 	}
+	subdomainChanged := false
+	if req.Subdomain != nil {
+		subdomain, err := s.normalizeSubdomain(*req.Subdomain)
+		if err != nil {
+			apiError(w, http.StatusBadRequest, "invalid_subdomain", err.Error())
+			return
+		}
+		updates["subdomain"] = subdomain
+		subdomainChanged = true
+	}
 	if req.Description != nil {
 		updates["description"] = *req.Description
 	}
@@ -104,6 +128,16 @@ func (s *Server) handleAdminUpdateLink(w http.ResponseWriter, r *http.Request, a
 		updates["active"] = *req.Active
 	}
 	if len(updates) > 0 {
+		if subdomainChanged {
+			// 查重与写入串行化（与创建路径同一把锁），窗口期内不释放，防止并发撞名
+			s.subdomainMu.Lock()
+			defer s.subdomainMu.Unlock()
+			if s.subdomainTaken(updates["subdomain"].(string), 0, link.ID) {
+				apiError(w, http.StatusBadRequest, "subdomain_taken",
+					"子域名 "+updates["subdomain"].(string)+" 已被其他服务占用")
+				return
+			}
+		}
 		if err := s.db.Model(&link).Updates(updates).Error; err != nil {
 			apiError(w, http.StatusInternalServerError, "server_error", "更新链接失败")
 			return

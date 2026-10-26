@@ -22,6 +22,7 @@
 - 门户是唯一登录点：登录 gate 后访问任一子系统，子系统重定向到 `/oauth2/authorize`，gate 检测到已有会话即免登录发授权码（SSO）。
 - 登出：RP-initiated logout，销毁 gate 会话并回跳 `post_logout_redirect_uri`。
 - 身份源：本地账号（admin 兜底运维）+ 飞书 OAuth 上游。
+- 子域名（子站）访问：`Host` 为 `<label>.<门户域名>` 的请求由内置反向路由器（标准库 `httputil.ReverseProxy`）转发到对应服务的入口地址，无需 nginx 等额外中间件。
 
 ## 2. 关键决策（已与研发确认）
 
@@ -30,8 +31,9 @@
 | 身份源 | 本地账号 + 飞书上游联邦 |
 | 子系统账号 | SSO 首次登录自动开户，赋默认角色，管理员事后调整 |
 | 角色映射 | gate 统一用户组，经 id_token/userinfo 的 `groups` 声明下发；子系统按 client 级映射表换算本地角色 |
-| HTTP 框架 | 标准库 `net/http`（零额外部依赖） |
+| HTTP 框架 | 标准库 `net/http`（零额外部依赖）；子站反向代理亦用标准库 `httputil.ReverseProxy` |
 | DCR 模式 | RFC 7591 受保护注册：需 initial access token（管理员在门户签发/吊销） |
+| 子站域名 | 设置「门户主域名」（缺省按 issuer 推断）+ 服务级子站标签（仅管理员可配，防 DCR 抢注；客户端与链接之间全局唯一） |
 
 ## 3. 协议端点
 
@@ -46,12 +48,15 @@
 | `POST /oauth2/register` | RFC 7591 受保护 DCR |
 | `GET/PUT/DELETE /oauth2/register/{client_id}` | RFC 7592 客户端管理（initial token 或 client 凭据） |
 
+子站路由不在端点表中：`Host` 命中 `<label>.<门户域名>` 的请求（任意路径）直接进入反向代理（客户端回源 `portal_url`，链接回源 `url`；改写上游 Host、附加 `X-Forwarded-*`，支持 WebSocket/流式），未知或已停用的子站返回 404；门户域名自身与其他 Host 照常走门户路由。
+
 ## 4. 数据模型（GORM + 纯 Go SQLite）
 
 - **User**：id, username, password_hash(空=仅联邦), name, email, feishu_union_id(唯一), must_change_password, active
 - **Group**：id, name(唯一)；**UserGroup** 关联。内置组：admin / operate / view（与应用角色对齐）
 - **Session**：id(随机 token, cookie `gate_session`), user_id, expires_at, created_ip；滑动续期
-- **Client**：client_id, client_secret_hash, name, redirect_uris(JSON), scopes, token_endpoint_auth_method(confidential/public), portal_url, groups_map(JSON: gate组→子系统角色), active, reg_token(用于 RFC 7592 管理凭据)
+- **Client**：client_id, client_secret_hash, name, redirect_uris(JSON), scopes, token_endpoint_auth_method(confidential/public), portal_url, subdomain(可选，子站标签), groups_map(JSON: gate组→子系统角色), active, reg_token(用于 RFC 7592 管理凭据)
+- **AppLink**：name, description, logo_url, url, subdomain(可选，子站标签), sort, active
 - **InitialToken**：token_hash, remark, expires_at, revoked
 - **SigningKey**：kid, ed25519 私钥（创建即持久化，多 key 共存实现轮换）
 - **AuthCode**：code, client_id, user_id, redirect_uri, scope, nonce, code_challenge, method, expires_at（一次性）
@@ -68,7 +73,7 @@
 - `POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/auth/me`、`POST /api/auth/change-password`
 - `GET /api/auth/feishu/start`、`GET /api/auth/feishu/callback`（state 防 CSRF，自动 provision：按 union_id 命中或建新账号）
 - `GET /api/apps`：已接入系统卡片（来自 Client.portal_url）
-- 管理端（admin 组）：`/api/admin/users`、`/api/admin/groups`、`/api/admin/clients`（吊销/重置 secret）、`/api/admin/initial-tokens`、`/api/admin/audit`、`/api/admin/settings`（飞书 app 凭据）
+- 管理端（admin 组）：`/api/admin/users`、`/api/admin/groups`、`/api/admin/clients`（吊销/重置 secret/子域名）、`/api/admin/links`（子域名）、`/api/admin/initial-tokens`、`/api/admin/audit`、`/api/admin/settings`（飞书 app 凭据、会话时长、门户主域名）
 
 ## 7. 应用接入改造
 
@@ -83,7 +88,7 @@
 
 ## 8. 部署形态
 
-Go 单二进制 + go:embed 前端 + SQLite + docker-compose；可选自签 HTTPS 双协议开关。默认端口 `:8080`。
+Go 单二进制 + go:embed 前端 + SQLite + docker-compose；可选自签 HTTPS 双协议开关。默认端口 `:8080`。启用子站访问需将 `*.<门户域名>` 泛解析指向本服务（与门户同端口）。
 
 ## 9. 技术栈
 

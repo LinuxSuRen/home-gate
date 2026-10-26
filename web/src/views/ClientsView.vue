@@ -7,16 +7,16 @@ const clients = ref([])
 const loading = ref(true)
 const showEdit = ref(false)
 const editing = ref(null)
-const form = ref({ name: '', description: '', logo_url: '', portal_url: '' })
+const form = ref({ name: '', description: '', logo_url: '', portal_url: '', subdomain: '' })
 
 // ---- 新建客户端（管理员代第三方系统注册） ----
 const showCreate = ref(false)
 const creating = ref(false)
-const createForm = ref({ name: '', redirect_uris: '', auth_method: 'client_secret_basic', scope: 'openid profile email offline_access', portal_url: '', description: '', logo_url: '' })
+const createForm = ref({ name: '', redirect_uris: '', auth_method: 'client_secret_basic', scope: 'openid profile email offline_access', portal_url: '', description: '', logo_url: '', subdomain: '' })
 const createdCreds = ref(null) // { client_id, client_secret, registration_access_token }
 
 function openCreate() {
-  createForm.value = { name: '', redirect_uris: '', auth_method: 'client_secret_basic', scope: 'openid profile email offline_access', portal_url: '', description: '', logo_url: '' }
+  createForm.value = { name: '', redirect_uris: '', auth_method: 'client_secret_basic', scope: 'openid profile email offline_access', portal_url: '', description: '', logo_url: '', subdomain: '' }
   createdCreds.value = null
   showCreate.value = true
 }
@@ -38,6 +38,7 @@ async function submitCreate() {
       portal_url: f.portal_url,
       description: f.description,
       logo_url: f.logo_url,
+      subdomain: (f.subdomain || '').trim(),
     })
     ElMessage.success('客户端已创建')
     await load()
@@ -67,6 +68,7 @@ function openEdit(c) {
     description: c.description || '',
     logo_url: c.logo_url || '',
     portal_url: c.portal_url || '',
+    subdomain: c.subdomain || '',
   }
   showEdit.value = true
 }
@@ -78,6 +80,7 @@ async function saveEdit() {
       description: form.value.description,
       logo_url: form.value.logo_url,
       portal_url: form.value.portal_url,
+      subdomain: (form.value.subdomain || '').trim(),
     })
     ElMessage.success('已保存')
     showEdit.value = false
@@ -127,6 +130,12 @@ async function resetSecret(c) {
         </template>
       </el-table-column>
       <el-table-column prop="token_endpoint_auth_method" label="认证方式" width="160" />
+      <el-table-column label="子域名" width="110">
+        <template #default="{ row }">
+          <span v-if="row.subdomain" class="dim">{{ row.subdomain }}</span>
+          <span v-else class="dim">—</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="description" label="描述" min-width="140" />
       <el-table-column label="状态" width="80">
         <template #default="{ row }">
@@ -163,6 +172,10 @@ async function resetSecret(c) {
           </el-form-item>
           <el-form-item label="入口地址">
             <el-input v-model="createForm.portal_url" placeholder="https://gitlab.example.com" />
+            <div class="dim" style="line-height: 1.6; margin-top: 4px">配置子域名后作为子站的回源地址</div>
+          </el-form-item>
+          <el-form-item label="子域名">
+            <el-input v-model="createForm.subdomain" placeholder="如 license，留空不启用；须先在系统设置配置门户域名" />
           </el-form-item>
           <el-form-item label="描述">
             <el-input v-model="createForm.description" />
@@ -203,6 +216,10 @@ async function resetSecret(c) {
         </el-form-item>
         <el-form-item label="入口地址">
           <el-input v-model="form.portal_url" placeholder="点击卡片跳转的地址（不在卡片上展示）" />
+          <div class="dim" style="line-height: 1.6; margin-top: 4px">配置子域名后作为子站的回源地址</div>
+        </el-form-item>
+        <el-form-item label="子域名">
+          <el-input v-model="form.subdomain" placeholder="如 license → license.门户域名；留空清除" />
         </el-form-item>
       </el-form>
       <template #footer>

@@ -10,6 +10,8 @@ const oidcEndpoints = ref({})
 const saving = ref(false)
 const sessionTTL = ref(24)
 const sessionSaving = ref(false)
+const portalDomain = ref('')
+const domainSaving = ref(false)
 
 onMounted(async () => {
   try {
@@ -17,6 +19,7 @@ onMounted(async () => {
     feishuAppID.value = s.feishu_app_id || ''
     feishuCallback.value = s.feishu_callback || ''
     sessionTTL.value = s.session_ttl_hours || 24
+    portalDomain.value = s.portal_domain || ''
     oidcEndpoints.value = { ...(s.oidc_endpoints || {}), scope: s.oidc_scope || 'openid profile email' }
   } catch (e) {
     ElMessage.error(e.message)
@@ -45,6 +48,23 @@ async function saveSession() {
     ElMessage.error(e.message)
   } finally {
     sessionSaving.value = false
+  }
+}
+
+async function saveDomain() {
+  const d = (portalDomain.value || '').trim().toLowerCase()
+  if (d && !/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(d)) {
+    ElMessage.warning('门户域名须为合法域名（如 tech.abc.com，不含协议与端口）')
+    return
+  }
+  domainSaving.value = true
+  try {
+    await saveSettings({ portal_domain: d })
+    ElMessage.success('已保存')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    domainSaving.value = false
   }
 }
 
@@ -101,6 +121,17 @@ async function save() {
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+      </el-form-item>
+    </el-form>
+
+    <h3>门户域名</h3>
+    <p class="dim">门户对外的域名（如 tech.abc.com）。配置后可在「客户端」「链接」中为服务分配子域名（如 license.tech.abc.com），由 home-gate 自身反向代理访问，无需 nginx 等中间件。需在 DNS 将 <code>*.tech.abc.com</code> 泛解析指向本服务。</p>
+    <el-form label-width="100px" style="max-width: 640px">
+      <el-form-item label="主域名">
+        <el-input v-model="portalDomain" placeholder="如 tech.abc.com（留空则按启动参数 -issuer 推断）" />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" :loading="domainSaving" @click="saveDomain">保存</el-button>
       </el-form-item>
     </el-form>
 

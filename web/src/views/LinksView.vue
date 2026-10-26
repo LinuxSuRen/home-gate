@@ -7,7 +7,7 @@ const links = ref([])
 const loading = ref(true)
 const showDlg = ref(false)
 const editing = ref(null)
-const form = ref({ name: '', url: '', description: '', logo_url: '', sort: 0, active: true })
+const form = ref({ name: '', url: '', description: '', logo_url: '', subdomain: '', sort: 0, active: true })
 
 async function loadAll() {
   loading.value = true
@@ -23,7 +23,7 @@ onMounted(loadAll)
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', url: '', description: '', logo_url: '', sort: 0, active: true }
+  form.value = { name: '', url: '', description: '', logo_url: '', subdomain: '', sort: 0, active: true }
   showDlg.value = true
 }
 
@@ -31,7 +31,7 @@ function openEdit(l) {
   editing.value = l
   form.value = {
     name: l.name || '', url: l.url || '', description: l.description || '',
-    logo_url: l.logo_url || '', sort: l.sort || 0, active: l.active !== false,
+    logo_url: l.logo_url || '', subdomain: l.subdomain || '', sort: l.sort || 0, active: l.active !== false,
   }
   showDlg.value = true
 }
@@ -42,10 +42,11 @@ async function save() {
     return
   }
   try {
+    const payload = { ...form.value, subdomain: (form.value.subdomain || '').trim() }
     if (editing.value) {
-      await updateLink(editing.value.id, form.value)
+      await updateLink(editing.value.id, payload)
     } else {
-      await createLink(form.value)
+      await createLink(payload)
     }
     ElMessage.success('已保存')
     showDlg.value = false
@@ -80,6 +81,12 @@ async function handleRemove(l) {
     <el-table v-loading="loading" :data="links">
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column prop="url" label="地址" min-width="220" show-overflow-tooltip />
+      <el-table-column label="子域名" width="100">
+        <template #default="{ row }">
+          <span v-if="row.subdomain" class="dim">{{ row.subdomain }}</span>
+          <span v-else class="dim">—</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
       <el-table-column prop="sort" label="排序" width="80" />
       <el-table-column label="状态" width="80">
@@ -99,6 +106,10 @@ async function handleRemove(l) {
       <el-form label-width="80px">
         <el-form-item label="名称"><el-input v-model="form.name" placeholder="必填" /></el-form-item>
         <el-form-item label="地址"><el-input v-model="form.url" placeholder="https://…（必填）" /></el-form-item>
+        <el-form-item label="子域名">
+          <el-input v-model="form.subdomain" placeholder="如 license → license.门户域名；留空不启用" />
+          <div class="dim" style="line-height: 1.6; margin-top: 4px">配置后经 home-gate 反向代理访问该地址（须先在系统设置配置门户域名）</div>
+        </el-form-item>
         <el-form-item label="描述"><el-input v-model="form.description" /></el-form-item>
         <el-form-item label="Logo"><el-input v-model="form.logo_url" placeholder="图片地址，留空显示首字母" /></el-form-item>
         <el-form-item label="排序"><el-input-number v-model="form.sort" :min="0" /></el-form-item>
