@@ -9,17 +9,21 @@ import (
 
 // ---- 门户关注（收藏）----
 
-// handleListFavorites 当前用户的关注列表。
+// handleListFavorites 当前用户的关注列表（惰性过滤已失效的孤儿关注）。
 func (s *Server) handleListFavorites(w http.ResponseWriter, r *http.Request, u *model.User) {
 	var favs []model.Favorite
 	if err := s.db.Where("user_id = ?", u.ID).Order("id").Find(&favs).Error; err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "加载关注失败")
 		return
 	}
-	if favs == nil {
-		favs = []model.Favorite{}
+	favLinks, favApps := s.favoritesOf(u)
+	out := []model.Favorite{}
+	for _, f := range favs {
+		if (f.Kind == "link" && favLinks[f.Ref]) || (f.Kind == "app" && favApps[f.Ref]) {
+			out = append(out, f)
+		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": favs})
+	writeJSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
 // followTarget 校验关注目标存在且在门户中可见：

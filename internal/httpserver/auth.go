@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -351,6 +353,8 @@ func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
 }
 
 // favoritesOf 读取用户关注集合；未登录返回空集。
+// 惰性过滤已失效的关注（链接/客户端被删除或停用后不再计入），孤儿记录无需提前清理；
+// DB 错误记日志并按空集处理，避免静默吞错。
 func (s *Server) favoritesOf(u *model.User) (links, apps map[string]bool) {
 	links, apps = map[string]bool{}, map[string]bool{}
 	if u == nil {
@@ -358,12 +362,53 @@ func (s *Server) favoritesOf(u *model.User) (links, apps map[string]bool) {
 	}
 	var favs []model.Favorite
 	if err := s.db.Where("user_id = ?", u.ID).Find(&favs).Error; err != nil {
+		log.Printf("favorites: 加载用户 %d 的关注失败: %v", u.ID, err)
 		return
 	}
+	// 过滤仍然可见的链接关注（启用中才出现在门户）
+	var linkIDs []uint
 	for _, f := range favs {
-		if f.Kind == "link" {
+		if f.Kind != "link" {
+			continue
+		}
+		if id, err := strconv.ParseUint(f.Ref, 10, 64); err == nil {
+			linkIDs = append(linkIDs, uint(id))
+		}
+	}
+	visibleLinks := map[string]bool{}
+	if len(linkIDs) > 0 {
+		var rows []model.AppLink
+		if err := s.db.Where("id IN ? AND active = ?", linkIDs, true).Find(&rows).Error; err != nil {
+			log.Printf("favorites: 校验链接关注失败: %v", err)
+		} else {
+			for _, l := range rows {
+				visibleLinks[strconv.FormatUint(uint64(l.ID), 10)] = true
+			}
+		}
+	}
+	// 过滤仍然可见的应用关注（启用且配置了入口地址才出现在门户）
+	var clientIDs []string
+	for _, f := range favs {
+		if f.Kind == "app" {
+			clientIDs = append(clientIDs, f.Ref)
+		}
+	}
+	visibleApps := map[string]bool{}
+	if len(clientIDs) > 0 {
+		var rows []model.Client
+		if err := s.db.Where("client_id IN ? AND active = ? AND portal_url <> ''", clientIDs, true).
+			Find(&rows).Error; err != nil {
+			log.Printf("favorites: 校验应用关注失败: %v", err)
+		} else {
+			for _, c := range rows {
+				visibleApps[c.ClientID] = true
+			}
+		}
+	}
+	for _, f := range favs {
+		if f.Kind == "link" && visibleLinks[f.Ref] {
 			links[f.Ref] = true
-		} else if f.Kind == "app" {
+		} else if f.Kind == "app" && visibleApps[f.Ref] {
 			apps[f.Ref] = true
 		}
 	}

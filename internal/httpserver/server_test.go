@@ -665,6 +665,66 @@ func TestFavorites(t *testing.T) {
 		t.Fatalf("app without portal_url should 404, got %d", w.Code)
 	}
 
+	// 惰性过滤：关注后目标失效（停用）时，关注列表不再计入；恢复后重新可见
+	w, out = doJSON(t, h, "POST", "/api/admin/links",
+		`{"name":"临时看板","url":"https://tmp.example.com"}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("create temp link: %d %s", w.Code, w.Body.String())
+	}
+	tmpID := fmt.Sprintf("%v", out["data"].(map[string]any)["id"])
+	w, _ = doJSON(t, h, "PUT", "/api/favorites/link/"+tmpID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("follow temp link: %d", w.Code)
+	}
+	w, _ = doJSON(t, h, "PUT", "/api/admin/links/"+tmpID, `{"active":false}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("disable temp link: %d", w.Code)
+	}
+	w, favs = doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	if n := len(favs["data"].([]any)); n != 2 {
+		t.Fatalf("disabled link should be lazily filtered from favorites, got %v", favs["data"])
+	}
+	w, _ = doJSON(t, h, "PUT", "/api/admin/links/"+tmpID, `{"active":true}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("re-enable temp link: %d", w.Code)
+	}
+	w, favs = doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	if n := len(favs["data"].([]any)); n != 3 {
+		t.Fatalf("re-enabled link should be visible in favorites again, got %v", favs["data"])
+	}
+
+	// 停用已关注的客户端 → 应用关注同样被惰性过滤（无需删表清理）
+	w, list := doJSON(t, h, "GET", "/api/admin/clients", "", adminHdr)
+	var cdbID any
+	for _, c := range list["data"].([]any) {
+		if m := c.(map[string]any); m["client_id"] == clientID {
+			cdbID = m["id"]
+		}
+	}
+	if cdbID == nil {
+		t.Fatalf("client %s not found in admin list", clientID)
+	}
+	w, _ = doJSON(t, h, "PUT", fmt.Sprintf("/api/admin/clients/%v", cdbID), `{"active":false}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("disable client: %d %s", w.Code, w.Body.String())
+	}
+	w, favs = doJSON(t, h, "GET", "/api/favorites", "", adminHdr)
+	for _, f := range favs["data"].([]any) {
+		if f.(map[string]any)["kind"] == "app" {
+			t.Fatalf("favorite of disabled client should be lazily filtered, got %v", favs["data"])
+		}
+	}
+	w, _ = doJSON(t, h, "PUT", fmt.Sprintf("/api/admin/clients/%v", cdbID), `{"active":true}`, adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("re-enable client: %d", w.Code)
+	}
+
+	// 清理临时链接的关注，保持后续断言简单
+	w, _ = doJSON(t, h, "DELETE", "/api/favorites/link/"+tmpID, "", adminHdr)
+	if w.Code != http.StatusOK {
+		t.Fatalf("unfollow temp link: %d", w.Code)
+	}
+
 	// 取关应用 → followed 变 false
 	w, _ = doJSON(t, h, "DELETE", "/api/favorites/app/"+clientID, "", adminHdr)
 	if w.Code != http.StatusOK {
