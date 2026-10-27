@@ -18,6 +18,7 @@ import (
 )
 
 const testIssuer = "https://gate.test"
+const testVersion = "v0.0.1-test"
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
@@ -35,15 +36,19 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("token manager: %v", err)
 	}
-	return New(db, tm, testIssuer)
+	return New(db, tm, testIssuer, testVersion)
 }
 
 // doJSON 执行 JSON 请求并返回响应与解析结果。
+// 与前端封装一致：非 GET 请求自动携带 X-Requested-With（管理端变更接口的 CSRF 防御要求）。
 func doJSON(t *testing.T, h http.Handler, method, path, body string, header map[string]string) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if method != http.MethodGet && method != http.MethodHead {
+		req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	}
 	for k, v := range header {
 		req.Header.Set(k, v)

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { getSettings, saveSettings } from '../api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getSettings, saveSettings, getVersion, checkUpdate, upgrade } from '../api'
 
 const feishuAppID = ref('')
 const feishuAppSecret = ref('')
@@ -10,6 +10,10 @@ const oidcEndpoints = ref({})
 const saving = ref(false)
 const sessionTTL = ref(24)
 const sessionSaving = ref(false)
+const ver = ref(null)
+const updateInfo = ref(null)
+const checking = ref(false)
+const upgrading = ref(false)
 
 onMounted(async () => {
   try {
@@ -21,7 +25,60 @@ onMounted(async () => {
   } catch (e) {
     ElMessage.error(e.message)
   }
+  try {
+    ver.value = await getVersion()
+  } catch {
+    ver.value = null
+  }
 })
+
+async function doCheckUpdate() {
+  checking.value = true
+  updateInfo.value = null
+  try {
+    updateInfo.value = await checkUpdate()
+    if (updateInfo.value.container) {
+      ElMessage.warning('检测到容器部署，请通过更新镜像升级')
+    }
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    checking.value = false
+  }
+}
+
+async function doUpgrade() {
+  const target = updateInfo.value && updateInfo.value.latest
+  try {
+    await ElMessageBox.confirm(
+      `将升级到 ${target || '最新版本'}。下载与完整性校验可能需要数分钟，期间请勿关闭页面；` +
+        '完成后服务自动重启，短暂不可访问属正常现象。',
+      '一键升级',
+      { type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  upgrading.value = true
+  try {
+    const res = await upgrade()
+    ElMessage.success(`已升级到 ${res.upgraded_to || target || '新版本'}，等待服务重启完成…`)
+    // 服务重启期间不可达：轮询 /healthz 直到恢复（最长约 1 分钟）再刷新页面
+    for (let i = 0; i < 30; i++) {
+      try {
+        const resp = await fetch('/healthz', { cache: 'no-store' })
+        if (resp.ok) break
+      } catch {
+        /* 重启中，继续等待 */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+    location.reload()
+  } catch (e) {
+    ElMessage.error(e.message)
+    upgrading.value = false
+  }
+}
 
 const endpointLabels = [
   ['authorize', '授权端点'],
@@ -113,6 +170,40 @@ async function save() {
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="sessionSaving" @click="saveSession">保存</el-button>
+      </el-form-item>
+    </el-form>
+
+    <h3>版本与更新</h3>
+    <p class="dim">
+      当前版本 <b>{{ ver ? (ver.version || 'dev') : '…' }}</b>（{{ ver ? `${ver.goos}/${ver.goarch}` : '' }}）。
+      从 GitHub Release 检查并升级；容器部署请通过更新镜像升级。
+    </p>
+    <el-form label-width="100px" style="max-width: 640px">
+      <el-form-item label="最新版本">
+        <template v-if="updateInfo">
+          <el-tag v-if="updateInfo.has_update" type="warning" size="small">
+            {{ updateInfo.latest }} 可升级
+          </el-tag>
+          <el-tag v-else type="success" size="small">已是最新（{{ updateInfo.latest }}）</el-tag>
+          <a
+            v-if="updateInfo.release_url"
+            :href="updateInfo.release_url"
+            target="_blank"
+            rel="noopener"
+            class="dim"
+            style="margin-left: 8px"
+          >Release 说明</a>
+        </template>
+        <span v-else class="dim">未检查</span>
+      </el-form-item>
+      <el-form-item>
+        <el-button :loading="checking" @click="doCheckUpdate">检查更新</el-button>
+        <el-button
+          v-if="updateInfo && updateInfo.has_update && updateInfo.asset && !updateInfo.container"
+          type="primary"
+          :loading="upgrading"
+          @click="doUpgrade"
+        >一键升级</el-button>
       </el-form-item>
     </el-form>
 

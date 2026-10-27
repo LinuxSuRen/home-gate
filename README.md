@@ -46,6 +46,13 @@ docker run -d -p 8080:8080 -v ./data:/data ghcr.io/linuxsuren/home-gate:latest
 ./home-gate -addr :8080 -issuer https://gate.example.com -data ./data
 ```
 
+### 升级与自更新
+
+- 管理后台「设置 → 版本与更新」支持检查 GitHub 最新 Release 并一键升级（仅二进制部署；容器部署请更新镜像）。
+- 下载强制校验 Release 附带的 `.sha256` 文件，且仅接受 GitHub 官方域名的下载地址；升级异常时自动回滚 `.old` 备份。
+- `GET /api/version` 为公开端点，会暴露当前版本号与运行平台（自托管场景可接受）；如需隐藏，请在反向代理层限制该路径。
+- systemd 部署时升级会通过 `systemctl restart` 重启服务（fork 出的子进程会脱离 cgroup 监管）；dev/源码构建拒绝自更新。
+
 ## 接入一个系统（应用视角）
 
 1. 管理员在「管理后台 → 注册令牌」签发一个 initial access token。

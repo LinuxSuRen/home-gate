@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { login, feishuLoginURL, getFeishuEnabled } from '../api'
+import { login, feishuLoginURL, getFeishuEnabled, getVersion } from '../api'
 
 const props = defineProps({ next: { type: String, default: '/' } })
 const emit = defineEmits(['success'])
@@ -9,12 +9,19 @@ const username = ref('')
 const password = ref('')
 const submitting = ref(false)
 const feishuEnabled = ref(false)
+const versionText = ref('')
 
 onMounted(async () => {
   try {
     feishuEnabled.value = await getFeishuEnabled()
   } catch {
     feishuEnabled.value = false
+  }
+  try {
+    const v = await getVersion()
+    versionText.value = v.version || ''
+  } catch {
+    versionText.value = ''
   }
 })
 
@@ -65,6 +72,7 @@ async function submit() {
         </el-button>
       </template>
     </el-card>
+    <div class="login-version dim">home-gate {{ versionText }}</div>
   </div>
 </template>
 
@@ -88,5 +96,9 @@ async function submit() {
 .login-logo {
   width: 56px;
   height: 56px;
+}
+.login-version {
+  position: fixed;
+  bottom: 16px;
 }
 </style>
