@@ -61,6 +61,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/auth/feishu/enabled", s.handleFeishuEnabled)
 	s.mux.HandleFunc("GET /api/auth/feishu/start", s.handleFeishuStart)
 	s.mux.HandleFunc("GET /api/auth/feishu/callback", s.handleFeishuCallback)
+	s.mux.HandleFunc("GET /api/auth/face/enabled", s.handleFaceEnabled)
+	s.mux.HandleFunc("POST /api/auth/face-login", s.handleFaceLogin)
 	s.mux.HandleFunc("GET /api/apps", s.requireSession(s.handleApps))
 
 	// 管理端 API（admin 组）
@@ -96,6 +98,9 @@ func (s *Server) routes() {
 func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		go s.db.CleanupExpired() // 惰性清理过期数据；失败不影响请求
+		if s.maybeSubsite(w, r) { // 子站（子域名）命中时反向代理到对应服务
+			return
+		}
 		s.mux.ServeHTTP(w, r)
 	})
 }

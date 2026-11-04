@@ -64,6 +64,14 @@ export const feishuLoginURL = (next) =>
 export const getFeishuEnabled = () =>
   request('/api/auth/feishu/enabled').then((d) => !!d.enabled)
 
+export const getFaceEnabled = () =>
+  request('/api/auth/face/enabled').then((d) => !!d.enabled)
+export const faceLogin = (imageBlob) => {
+  const form = new FormData()
+  form.append('image', imageBlob, 'face.jpg')
+  return request('/api/auth/face-login', { method: 'POST', body: form })
+}
+
 // ---- 应用入口 ----
 export const getApps = () => request('/api/apps')
 

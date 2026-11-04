@@ -6,6 +6,9 @@ import { getSettings, saveSettings, getVersion, checkUpdate, upgrade } from '../
 const feishuAppID = ref('')
 const feishuAppSecret = ref('')
 const feishuCallback = ref('')
+const faceURL = ref('')
+const faceToken = ref('')
+const faceSaving = ref(false)
 const oidcEndpoints = ref({})
 const saving = ref(false)
 const sessionTTL = ref(24)
@@ -14,13 +17,17 @@ const ver = ref(null)
 const updateInfo = ref(null)
 const checking = ref(false)
 const upgrading = ref(false)
+const portalDomain = ref('')
+const domainSaving = ref(false)
 
 onMounted(async () => {
   try {
     const s = await getSettings()
     feishuAppID.value = s.feishu_app_id || ''
     feishuCallback.value = s.feishu_callback || ''
+    faceURL.value = s.face_recognition_url || ''
     sessionTTL.value = s.session_ttl_hours || 24
+    portalDomain.value = s.portal_domain || ''
     oidcEndpoints.value = { ...(s.oidc_endpoints || {}), scope: s.oidc_scope || 'openid profile email' }
   } catch (e) {
     ElMessage.error(e.message)
@@ -105,6 +112,40 @@ async function saveSession() {
   }
 }
 
+async function saveDomain() {
+  const d = (portalDomain.value || '').trim().toLowerCase()
+  if (d && !/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(d)) {
+    ElMessage.warning('门户域名须为合法域名（如 tech.abc.com，不含协议与端口）')
+    return
+  }
+  domainSaving.value = true
+  try {
+    await saveSettings({ portal_domain: d })
+    ElMessage.success('已保存')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    domainSaving.value = false
+  }
+}
+
+async function saveFace() {
+  faceSaving.value = true
+  try {
+    const body = { face_recognition_url: faceURL.value.trim() }
+    if (faceToken.value.trim()) {
+      body.face_recognition_token = faceToken.value.trim()
+    }
+    await saveSettings(body)
+    faceToken.value = ''
+    ElMessage.success('人脸识别集成已保存')
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    faceSaving.value = false
+  }
+}
+
 async function copyText(text) {
   try {
     await navigator.clipboard.writeText(text)
@@ -158,6 +199,31 @@ async function save() {
       </el-form-item>
       <el-form-item>
         <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+      </el-form-item>
+    </el-form>
+
+    <h3>门户域名</h3>
+    <p class="dim">门户对外的域名（如 tech.abc.com）。配置后可在「客户端」「链接」中为服务分配子域名（如 license.tech.abc.com），由 home-gate 自身反向代理访问，无需 nginx 等中间件。需在 DNS 将 <code>*.tech.abc.com</code> 泛解析指向本服务。</p>
+    <el-form label-width="100px" style="max-width: 640px">
+      <el-form-item label="主域名">
+        <el-input v-model="portalDomain" placeholder="如 tech.abc.com（留空则按启动参数 -issuer 推断）" />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" :loading="domainSaving" @click="saveDomain">保存</el-button>
+      </el-form-item>
+    </el-form>
+
+    <h3>人脸识别登录</h3>
+    <p class="dim">对接 <a href="https://github.com/LinuxSuRen/face-recognition-server" target="_blank" rel="noopener">face-recognition-server</a> 后，登录页将启用「使用人脸识别登录」。需在人脸识别平台的管理页面签发一个包含 identify 权限的 API 令牌。</p>
+    <el-form label-width="100px" style="max-width: 640px">
+      <el-form-item label="服务地址">
+        <el-input v-model="faceURL" placeholder="http://localhost:8080" />
+      </el-form-item>
+      <el-form-item label="API 令牌">
+        <el-input v-model="faceToken" type="password" show-password placeholder="face_xxx（留空表示不修改）" />
+      </el-form-item>
+      <el-form-item>
+        <el-button type="primary" :loading="faceSaving" @click="saveFace">保存</el-button>
       </el-form-item>
     </el-form>
 

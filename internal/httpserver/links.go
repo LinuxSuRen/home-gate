@@ -26,6 +26,7 @@ func (s *Server) handleAdminCreateLink(w http.ResponseWriter, r *http.Request, a
 		Description string `json:"description"`
 		LogoURL     string `json:"logo_url"`
 		URL         string `json:"url"`
+		Subdomain   string `json:"subdomain"`
 		Sort        int    `json:"sort"`
 		Active      *bool  `json:"active"`
 	}
@@ -37,19 +38,28 @@ func (s *Server) handleAdminCreateLink(w http.ResponseWriter, r *http.Request, a
 		apiError(w, http.StatusBadRequest, "invalid_request", "名称与地址必填")
 		return
 	}
+	subdomain, err := s.normalizeSubdomain(req.Subdomain)
+	if err != nil {
+		apiError(w, http.StatusBadRequest, "invalid_subdomain", err.Error())
+		return
+	}
+	if s.subdomainTaken(subdomain, 0, 0) {
+		apiError(w, http.StatusBadRequest, "subdomain_taken", "子域名 "+subdomain+" 已被其他服务占用")
+		return
+	}
 	active := true
 	if req.Active != nil {
 		active = *req.Active
 	}
 	link := &model.AppLink{
 		Name: req.Name, Description: req.Description, LogoURL: req.LogoURL,
-		URL: req.URL, Sort: req.Sort, Active: active,
+		URL: req.URL, Subdomain: subdomain, Sort: req.Sort, Active: active,
 	}
 	if err := s.db.Create(link).Error; err != nil {
 		apiError(w, http.StatusInternalServerError, "server_error", "创建链接失败")
 		return
 	}
-	s.db.Audit(admin.Username, "link_create", "name="+req.Name, clientIP(r))
+	s.db.Audit(admin.Username, "link_create", "name="+req.Name+" subdomain="+subdomain, clientIP(r))
 	writeJSON(w, http.StatusOK, map[string]any{"data": link})
 }
 
@@ -69,6 +79,7 @@ func (s *Server) handleAdminUpdateLink(w http.ResponseWriter, r *http.Request, a
 		Description *string `json:"description"`
 		LogoURL     *string `json:"logo_url"`
 		URL         *string `json:"url"`
+		Subdomain   *string `json:"subdomain"`
 		Sort        *int    `json:"sort"`
 		Active      *bool   `json:"active"`
 	}
@@ -90,6 +101,18 @@ func (s *Server) handleAdminUpdateLink(w http.ResponseWriter, r *http.Request, a
 			return
 		}
 		updates["url"] = *req.URL
+	}
+	if req.Subdomain != nil {
+		subdomain, err := s.normalizeSubdomain(*req.Subdomain)
+		if err != nil {
+			apiError(w, http.StatusBadRequest, "invalid_subdomain", err.Error())
+			return
+		}
+		if s.subdomainTaken(subdomain, 0, link.ID) {
+			apiError(w, http.StatusBadRequest, "subdomain_taken", "子域名 "+subdomain+" 已被其他服务占用")
+			return
+		}
+		updates["subdomain"] = subdomain
 	}
 	if req.Description != nil {
 		updates["description"] = *req.Description
