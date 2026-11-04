@@ -496,6 +496,12 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request, 
 		"portal_domain": s.portalDomain(),
 		// 飞书登录回调地址：需加入飞书开放平台应用的重定向 URL 白名单
 		"feishu_callback": base + "/api/auth/feishu/callback",
+		// 人脸识别集成：指向 face-recognition-server 的地址与令牌
+		"face_recognition_url": s.db.GetSetting("face_recognition_url"),
+		"face_recognition_enabled": func() bool {
+			url, token := s.faceRecognitionConfig()
+			return url != "" && token != ""
+		}(),
 		"oidc_endpoints": map[string]string{
 			"discovery": base + "/.well-known/openid-configuration",
 			"authorize": base + "/oauth2/authorize",
@@ -510,10 +516,12 @@ func (s *Server) handleAdminGetSettings(w http.ResponseWriter, r *http.Request, 
 
 func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request, admin *model.User) {
 	var req struct {
-		FeishuAppID      string `json:"feishu_app_id"`
-		FeishuAppSecret  string `json:"feishu_app_secret"`
-		SessionTTLHours  *int   `json:"session_ttl_hours"`
-		PortalDomain     *string `json:"portal_domain"`
+		FeishuAppID           string  `json:"feishu_app_id"`
+		FeishuAppSecret       string  `json:"feishu_app_secret"`
+		SessionTTLHours       *int    `json:"session_ttl_hours"`
+		PortalDomain          *string `json:"portal_domain"`
+		FaceRecognitionURL    *string `json:"face_recognition_url"`
+		FaceRecognitionToken  *string `json:"face_recognition_token"`
 	}
 	if err := readJSONBody(r, &req); err != nil {
 		apiError(w, http.StatusBadRequest, "invalid_request", "请求体不是合法 JSON")
@@ -556,6 +564,20 @@ func (s *Server) handleAdminSettings(w http.ResponseWriter, r *http.Request, adm
 			return
 		}
 		detail += "飞书上游配置 "
+	}
+	if req.FaceRecognitionURL != nil {
+		if err := s.db.SetSetting("face_recognition_url", *req.FaceRecognitionURL); err != nil {
+			apiError(w, http.StatusInternalServerError, "server_error", "保存设置失败")
+			return
+		}
+		detail += "人脸识别集成 "
+	}
+	if req.FaceRecognitionToken != nil {
+		if err := s.db.SetSetting("face_recognition_token", *req.FaceRecognitionToken); err != nil {
+			apiError(w, http.StatusInternalServerError, "server_error", "保存设置失败")
+			return
+		}
+		detail += "人脸识别集成 "
 	}
 	if detail == "" {
 		detail = "无变更"

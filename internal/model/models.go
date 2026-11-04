@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-// User 门户用户：本地账号（password_hash 非空）或飞书联邦账号（feishu_union_id 非空）
+// User 门户用户：本地账号（password_hash 非空）或飞书联邦账号（feishu_union_id 非空）或人脸识别账号（face_subject 非空）
 type User struct {
 	ID                uint      `gorm:"primarykey" json:"id"`
 	Username          string    `gorm:"uniqueIndex;size:64" json:"username"`
@@ -12,6 +12,7 @@ type User struct {
 	Name              string    `gorm:"size:128" json:"name"`
 	Email             string    `gorm:"size:128" json:"email"`
 	FeishuUnionID     string    `gorm:"index;size:64" json:"-"` // 空 = 非联邦；唯一性由联邦登录查重保证
+	FaceSubject       string    `gorm:"index;size:64" json:"-"`  // face-recognition-server 的 employee_no
 	MustChangePasswd  bool      `json:"must_change_password"`
 	Active            bool      `json:"active"`
 	Groups            []Group   `gorm:"many2many:user_groups;" json:"groups"`

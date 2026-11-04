@@ -61,6 +61,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/auth/feishu/enabled", s.handleFeishuEnabled)
 	s.mux.HandleFunc("GET /api/auth/feishu/start", s.handleFeishuStart)
 	s.mux.HandleFunc("GET /api/auth/feishu/callback", s.handleFeishuCallback)
+	s.mux.HandleFunc("GET /api/auth/face/enabled", s.handleFaceEnabled)
+	s.mux.HandleFunc("POST /api/auth/face-login", s.handleFaceLogin)
 	s.mux.HandleFunc("GET /api/apps", s.requireSession(s.handleApps))
 
 	// 管理端 API（admin 组）
